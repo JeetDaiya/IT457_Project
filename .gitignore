@@ -1,0 +1,19 @@
+# Environment
+.env
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Secrets / certs
+*.pem
+*.key
+*.crt
+
+# OS
+.DS_Store
+Thumbs.db
