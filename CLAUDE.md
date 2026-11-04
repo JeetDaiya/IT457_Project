@@ -73,6 +73,10 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 
 ## Repo-specific rules
+- **Feature branches** — always create a feature branch (e.g. `feature/<short-name>`) before
+  starting work. Never commit directly to `main`. Merge via pull request after review.
+- **No commits without approval** — never run `git commit` or `git push` unless the user
+  explicitly approves. Present the changes and ask first.
 - `ARCHITECTURE.md` and `GOTCHAS.md` are **living references** — edit them in place when the
   thing they describe changes. Never append a dated entry to them.
 - `CHANGELOG.md` is an **append-only log** — add one short dated bullet when you finish
