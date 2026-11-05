@@ -18,10 +18,12 @@ HTTP (api.py)    ─┐
 MQTT (mqtt_in.py)─┘
 ```
 
-Dependencies point inward only: `api` / `mqtt_in` → `service` → `rules`. `db` implements a port that `service` defines. Only `main.py` knows all the pieces and wires them together.
+Dependencies point inward only: `api` / `mqtt_in` → `service` → `rules`, and `settings` → `rules`. `db` implements a port that `service` defines. Only `main.py` knows all the pieces and wires them together.
 
 | Layer | File | Responsibility |
 |---|---|---|
+| Domain | `app/rules.py` | `Reading` (validation ranges), `Limits`, `is_abnormal()`. Imports nothing from the app |
+| Configuration | `app/settings.py` | `Settings` and `load_settings()` (environment → settings); `Settings.limits()` returns `Limits` |
 | Application | `app/service.py` | `process_reading()` plus the ports it needs: `ReadingStore`, `Clock` |
 | Infrastructure | `app/db.py` | `PostgresReadingStore` (SQLAlchemy Core + psycopg2), schema init, patient seeding, `SystemClock` |
 | Interface | `app/api.py` | Thin FastAPI routers: call the injected processor, map outcome → HTTP status |
