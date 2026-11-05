@@ -4,7 +4,7 @@
 
 ```
 app/          – FastAPI service (settings, db, rules, api, mqtt_in, main)
-infra/        – Docker Compose files, AWS scripts/notes
+infra/        – Dockerfile, docker-compose.yml, mosquitto/ config; AWS scripts/notes later
 loadtest/     – Locust and paho-mqtt generator scripts
 results/      – Raw run data, one folder per run, summary.csv
 docs/         – Living docs (this file, GOTCHAS, CHANGELOG, etc.)
@@ -64,3 +64,7 @@ Types: `device_id` / `patient_ref` string; `heart_rate` / `spo2` / `seq` integer
 ## Stage differences
 
 Settings-only; no forked code. See `CLAUDE.md` §Project context for the A / B / C table.
+
+## Compose stack (Stages A and B)
+
+`infra/docker-compose.yml` is the same file on the laptop and on the EC2 VM. Four services: `postgres` (healthcheck, named volume), `mosquitto` (`infra/mosquitto/mosquitto.conf`: anonymous listener on 1883, persistence, queue limit raised), `api` and `worker` (one image from `infra/Dockerfile`, Python 3.12; commands `python -m app.main api` / `worker`). `api` and `worker` wait for Postgres to be healthy and get `DATABASE_URL` and `MQTT_HOST` from Compose, everything else from `.env`. Published on the host: 8000 (API), 1883 (MQTT), 5432 or `POSTGRES_HOST_PORT` (Postgres). Anonymous MQTT is for local and firewalled testing only.
