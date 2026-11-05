@@ -16,3 +16,8 @@ _Things that have bitten us or are easy to get wrong. Updated in place._
 - **An error inside `process` (for example the database being down) is logged and the message is still acked, so that reading is lost.** Only the worker's loop is protected, not the reading. Count this as lost readings in any outage test.
 - **Laptop Python is 3.14; containers use 3.12.** Some packages may lack 3.14 builds, so run tests in a 3.12 venv.
 - **Stage C server time excludes the SQS wait.** `received_at` is stamped by the worker, after the queue.
+- **Database URLs must say `postgresql+psycopg2://`.** A bare `postgresql://` makes SQLAlchemy 2.1 look for psycopg v3 and the app crashes with `No module named 'psycopg'` (checked with SQLAlchemy 2.1.8, which `requirements.txt` resolves to). Compose already builds the right URL; the `DATABASE_URL` in `.env.example` is still the bare form.
+- **Run Compose from the repo root with `--env-file .env`** (`docker compose --env-file .env -f infra/docker-compose.yml up --build`), otherwise `${POSTGRES_*}` is read from `infra/` and Compose fails with "set POSTGRES_… in .env".
+- **A local PostgreSQL on the laptop usually already owns port 5432.** Set `POSTGRES_HOST_PORT` (for example 5433) in `.env`; containers still talk to each other on 5432.
+- **Mosquitto queues at most 1000 messages per client by default** (its documented default, not measured here). `infra/mosquitto/mosquitto.conf` raises it to 100000, because the 20 s restart test at 100 msg/s queues about 2000.
+

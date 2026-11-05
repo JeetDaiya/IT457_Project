@@ -1,0 +1,60 @@
+# Same file for Stage A (laptop) and Stage B (one EC2 VM).
+# Run from the repo root so Compose reads the shared .env for ${...} values:
+#   docker compose --env-file .env -f infra/docker-compose.yml up --build
+
+x-app: &app
+  build:
+    context: ..
+    dockerfile: infra/Dockerfile
+  env_file: ../.env
+  environment:
+    # Inside Compose the services are reached by name, not localhost.
+    # "+psycopg2" is required: a bare "postgresql://" makes recent SQLAlchemy look for psycopg v3.
+    DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    MQTT_HOST: mosquitto
+  depends_on:
+    postgres:
+      condition: service_healthy
+    mosquitto:
+      condition: service_started
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+    ports:
+      # Host port is overridable: a local PostgreSQL often already owns 5432.
+      # Stage B (EC2): decide whether to publish this at all when we get there.
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+
+  api:
+    <<: *app
+    command: ["python", "-m", "app.main", "api"]
+    ports:
+      - "8000:8000"
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "app.main", "worker"]
+
+volumes:
+  pgdata:
+  mosquitto-data:
