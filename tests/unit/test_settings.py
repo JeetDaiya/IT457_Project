@@ -6,8 +6,8 @@ import dataclasses
 
 import pytest
 
-from app.main import Settings, load_settings
-from app.service import Limits
+from app.rules import Limits
+from app.settings import Settings, load_settings
 
 DB_URL = "postgresql+psycopg2://user:secret@localhost:5432/minihs"
 

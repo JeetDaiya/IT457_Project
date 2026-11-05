@@ -14,7 +14,8 @@ from conftest import (
     make_reading,
 )
 
-from app.service import Limits, UnknownPatient, process_reading
+from app.rules import Limits
+from app.service import UnknownPatient, process_reading
 
 
 def run(reading, store, clock, limits=DEFAULT_LIMITS):
@@ -216,7 +217,7 @@ def test_process_reading_uses_the_limits_it_is_given():
 
 
 def _settings(**env):
-    from app.main import load_settings
+    from app.settings import load_settings
 
     return load_settings({"DATABASE_URL": "postgresql://u:p@localhost/db", **env})
 
