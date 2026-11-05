@@ -6,7 +6,8 @@ import psycopg2.errors
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.service import Reading, UnknownPatient
+from app.rules import Reading
+from app.service import UnknownPatient
 
 _SCHEMA_LOCK_KEY = 457_001  # arbitrary; makes concurrent init_schema calls take turns
 

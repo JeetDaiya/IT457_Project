@@ -3,7 +3,8 @@
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from app.service import ProcessReading, Reading, ReadingQueries, UnknownPatient
+from app.rules import Reading
+from app.service import ProcessReading, ReadingQueries, UnknownPatient
 
 _STATUS_FOR_OUTCOME = {"stored": 201, "duplicate": 200}
 

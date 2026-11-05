@@ -9,10 +9,11 @@ from typing import TYPE_CHECKING
 import paho.mqtt.client as mqtt
 from pydantic import ValidationError
 
-from app.service import ProcessReading, Reading, UnknownPatient
+from app.rules import Reading
+from app.service import ProcessReading, UnknownPatient
 
 if TYPE_CHECKING:
-    from app.main import Settings
+    from app.settings import Settings
 
 log = logging.getLogger(__name__)
 

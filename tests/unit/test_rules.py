@@ -8,7 +8,7 @@ import pytest
 from conftest import DEFAULT_LIMITS, READING_FIELDS, make_reading, valid_payload
 from pydantic import ValidationError
 
-from app.service import Limits, Reading, is_abnormal
+from app.rules import Limits, Reading, is_abnormal
 
 # --------------------------------------------------------------------------
 # Reading: hard validity ranges (inclusive bounds are valid)

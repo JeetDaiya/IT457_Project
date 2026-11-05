@@ -11,7 +11,8 @@ from typing import Any
 
 import pytest
 
-from app.service import Limits, Reading, UnknownPatient
+from app.rules import Limits, Reading
+from app.service import UnknownPatient
 
 # Two distinct, ordered instants for scripted clocks.
 T1 = datetime(2026, 11, 5, 9, 15, 3, 500_000, tzinfo=UTC)

@@ -11,8 +11,8 @@ import pytest
 from conftest import FakeProcess, make_reading, valid_payload
 
 from app import mqtt_in
-from app.main import load_settings
 from app.service import UnknownPatient
+from app.settings import load_settings
 
 DB_URL = "postgresql://u:p@localhost/db"
 
