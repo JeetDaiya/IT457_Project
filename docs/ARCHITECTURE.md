@@ -25,7 +25,7 @@ Dependencies point inward only: `api` / `mqtt_in` → `service` → `rules`. `db
 | Application | `app/service.py` | `process_reading()` plus the ports it needs: `ReadingStore`, `Clock` |
 | Infrastructure | `app/db.py` | `PostgresReadingStore` (SQLAlchemy Core + psycopg2), schema init, patient seeding, `SystemClock` |
 | Interface | `app/api.py` | Thin FastAPI routers: call the injected processor, map outcome → HTTP status |
-| Interface | `app/mqtt_in.py` | Parse message, call the injected processor, ack |
+| Interface | `app/mqtt_in.py` | `run()` subscribes to the topic at QoS 1 (persistent session) and reconnects; `handle_message()` parses, calls the injected processor and never raises. paho sends the ack after it returns |
 | Composition | `app/main.py` | Wires settings → store → processor; runs `api` or `worker` mode |
 
 `process_reading()` is the single shared function called by both the HTTP endpoint and the MQTT worker. Stage C adds an SQS queue between IoT Core and the worker; only the worker's input module changes.
