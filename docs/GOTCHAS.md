@@ -21,3 +21,4 @@ _Things that have bitten us or are easy to get wrong. Updated in place._
 - **A local PostgreSQL on the laptop usually already owns port 5432.** Set `POSTGRES_HOST_PORT` (for example 5433) in `.env`; containers still talk to each other on 5432.
 - **Mosquitto queues at most 1000 messages per client by default** (its documented default, not measured here). `infra/mosquitto/mosquitto.conf` raises it to 100000, because the 20 s restart test at 100 msg/s queues about 2000.
 
+- **Locust's `FastHttpUser` allows only 10 concurrent connections by default** (`concurrency`, read from its source). At a 200-250 ms round trip that would silently turn the open-loop generator into a closed loop at about 40-50 msg/s; `loadtest/locustfile.py` sets the pool to 2 x rate.

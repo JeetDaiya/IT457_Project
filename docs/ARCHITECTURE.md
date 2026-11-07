@@ -53,7 +53,7 @@ Types: `device_id` / `patient_ref` string; `heart_rate` / `spo2` / `seq` integer
 
 **Processor:** `main.py` builds one `process(reading) -> "stored" | "duplicate"` and injects it into `api.py` and the worker. Neither knows about the database.
 
-**Generator log** (Locust and paho write the same format): CSV `device_id,seq,send_time_utc,result,rtt_ms`. `result` is `ok` (HTTP 201 / MQTT PUBACK), `duplicate` (HTTP 200), `timeout`, or `error`. `send_time_utc` and `rtt_ms` come from the generator's own clock.
+**Generator log** (Locust and paho write the same format): CSV `device_id,seq,send_time_utc,result,rtt_ms`. `result` is `ok` (HTTP 201 / MQTT PUBACK), `duplicate` (HTTP 200), `timeout`, or `error`. `send_time_utc` and `rtt_ms` come from the generator's own clock. Each run folder `results/<date>_<stage>_<protocol>_<rate>_r<n>/` also holds `settings.json`, `ping.txt` (baseline ping, reported separately) and, from the Locust generator, `generator_summary.json` (counts, achieved rate, schedule lag). The Locust generator puts the run tag in `device_id` (`<stage>h<rate>r<n>`, for example `ah100r2-dev-0007`; `patient_ref` stays `P0007`), so lost-readings queries filter on `device_id LIKE 'ah100r2-%'`.
 
 **Run modes:** `python -m app.main api` and `python -m app.main worker` (same image, two containers). Env var names are listed in `.env.example`.
 
