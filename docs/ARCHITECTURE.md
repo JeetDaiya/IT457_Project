@@ -6,6 +6,7 @@
 app/          – FastAPI service (settings, db, rules, api, mqtt_in, main)
 infra/        – Dockerfile, docker-compose.yml, mosquitto/ config; AWS scripts/notes later
 loadtest/     – Locust and paho-mqtt generator scripts
+tests/        – unit/API tests (mocked) and tests/integration (running stack)
 results/      – Raw run data, one folder per run, summary.csv
 docs/         – Living docs (this file, GOTCHAS, CHANGELOG, etc.)
 ```
@@ -70,3 +71,8 @@ Settings-only; no forked code. See `CLAUDE.md` §Project context for the A / B /
 ## Compose stack (Stages A and B)
 
 `infra/docker-compose.yml` is the same file on the laptop and on the EC2 VM. Four services: `postgres` (healthcheck, named volume), `mosquitto` (`infra/mosquitto/mosquitto.conf`: anonymous listener on 1883, persistence, queue limit raised), `api` and `worker` (one image from `infra/Dockerfile`, Python 3.12; commands `python -m app.main api` / `worker`). `api` and `worker` wait for Postgres to be healthy and get `DATABASE_URL` and `MQTT_HOST` from Compose, everything else from `.env`. Published on the host: 8000 (API), 1883 (MQTT), 5432 or `POSTGRES_HOST_PORT` (Postgres). Anonymous MQTT is for local and firewalled testing only.
+
+## Tests
+
+- **Unit/API** (`tests/unit`, `tests/api`): mocked, no services needed. Plain `pytest`.
+- **Integration** (`tests/integration`, marker `integration`): black-box tests against a *running* stack, so the same files run on the laptop (A), the EC2 VM (B) and RDS (C, run from the VM). Set `TEST_BASE_URL`, `TEST_DATABASE_URL`, `TEST_MQTT_HOST` (and optionally `TEST_MQTT_PORT`); if any is unset they skip. Run with `pytest -m integration`. `test_http_path.py` is transport-independent; `test_mqtt_path.py` is the only file tied to the MQTT input, so Stage C adds an SQS variant of it and nothing else changes. Each test uses a unique `it-<uuid>-...` `device_id` and the run deletes its own rows afterwards. The package has an `__init__.py` so its `conftest.py` does not shadow `tests/conftest.py`.
