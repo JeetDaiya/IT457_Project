@@ -1,0 +1,16 @@
+{
+  "host": "100.98.4.89",
+  "port": 1883,
+  "rate": 100,
+  "duration": 120,
+  "tag": "am100r3",
+  "devices": 100,
+  "seed": 1,
+  "connections": 1,
+  "inflight": 200,
+  "timeout_s": 2.0,
+  "start_utc": "2026-11-10T15:31:27.725Z",
+  "paho": "1.6.1",
+  "python": "3.12.16",
+  "machine": "aarch64"
+}

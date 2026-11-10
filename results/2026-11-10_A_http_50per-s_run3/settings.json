@@ -1,0 +1,14 @@
+{
+  "host": "http://100.98.4.89:8000",
+  "rate": 50,
+  "duration": 120,
+  "tag": "ah50r3",
+  "devices": 100,
+  "seed": 1,
+  "pool": 100,
+  "timeout_s": 2.0,
+  "start_utc": "2026-11-10T15:22:56.951Z",
+  "locust": "2.47.0",
+  "python": "3.12.16",
+  "machine": "aarch64"
+}

@@ -1,0 +1,16 @@
+{
+  "host": "100.98.4.89",
+  "port": 1883,
+  "rate": 500,
+  "duration": 120,
+  "tag": "aconn100m500r1",
+  "devices": 100,
+  "seed": 1,
+  "connections": 100,
+  "inflight": 1000,
+  "timeout_s": 2.0,
+  "start_utc": "2026-11-10T17:46:51.200Z",
+  "paho": "1.6.1",
+  "python": "3.12.16",
+  "machine": "aarch64"
+}
