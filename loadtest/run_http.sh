@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One HTTP run: ./loadtest/run_http.sh <stage> <rate> <repeat> <base-url>
-# Env: OUT_ROOT (default results/), DURATION in seconds (default 120), PYTHON (default python).
+# Env: OUT_ROOT (default results/), DURATION in seconds (default 120), PYTHON (default python),
+#      STAGE_NAME (folder name only, default: the stage, a single letter upper-cased; see run_name.sh).
 set -u
 
 if [ $# -ne 4 ]; then
@@ -10,7 +11,8 @@ fi
 stage=$1 rate=$2 repeat=$3 url=$4
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-out="${OUT_ROOT:-$root/results}/$(date +%F)_${stage}_http_${rate}_r${repeat}"
+. "$root/loadtest/run_name.sh"
+out="${OUT_ROOT:-$root/results}/$(date +%F)_$(run_suffix "$stage" http "$rate" "$repeat")"
 if [ -e "$out" ]; then
     echo "refusing to reuse $out (raw results are never overwritten)" >&2
     exit 1

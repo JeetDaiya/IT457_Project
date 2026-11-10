@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One MQTT run: ./loadtest/run_mqtt.sh <stage> <rate> <repeat> <broker-host> [port]
 # Env: OUT_ROOT (default results/), DURATION in seconds (default 120), CONNECTIONS (default 1),
-#      PYTHON (default python).
+#      PYTHON (default python), STAGE_NAME and RUN_NOTE (folder name only; see run_name.sh).
 set -u
 
 if [ $# -lt 4 ] || [ $# -gt 5 ]; then
@@ -11,7 +11,8 @@ fi
 stage=$1 rate=$2 repeat=$3 host=$4 port=${5:-1883}
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-out="${OUT_ROOT:-$root/results}/$(date +%F)_${stage}_mqtt_${rate}_r${repeat}"
+. "$root/loadtest/run_name.sh"
+out="${OUT_ROOT:-$root/results}/$(date +%F)_$(run_suffix "$stage" mqtt "$rate" "$repeat")"
 if [ -e "$out" ]; then
     echo "refusing to reuse $out (raw results are never overwritten)" >&2
     exit 1
