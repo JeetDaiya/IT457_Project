@@ -50,7 +50,7 @@ cp "$times" "$folder/worker_restart.txt"
 started=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['started'])" "$folder/generator_summary.json")
 stored=$(echo "SELECT count(*) FROM readings WHERE device_id LIKE '${tag}-%';" | db | tr -d '[:space:]')
 {
-    echo "run: $folder  (tag $tag)"
+    echo "run: ${folder#"$root"/}  (tag $tag)"
     cat "$folder/worker_restart.txt"
     echo "sent by the generator: $started   stored: $stored   missing (sent minus stored): $((started - stored))"
     echo "longest gap between consecutive stored_at values: seconds,previous_stored_at,next_stored_at (UTC)"

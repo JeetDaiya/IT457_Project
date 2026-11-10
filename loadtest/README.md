@@ -101,17 +101,15 @@ longest gap between `stored_at` values) and `stored_per_second.csv` (backlog dra
 always started again, even if the run fails. `docker compose stop` waits 10 s before killing the worker, so the real
 outage starts when `stop_returned` is logged.
 
-Result tables for `docs/RESULTS.md` (mean and range over the repeats, restart-test table), built from the raw run folders:
+After new runs, refresh the compact stats and the result tables (see `results/README.md` for what is in git and what is archived):
 
 ```bash
-python loadtest/result_tables.py results docs/RESULTS.md
+python loadtest/result_tables.py stats results            # raw run folders -> results/run_stats.csv, restart_stats.csv
+python loadtest/result_tables.py results docs/RESULTS.md   # those two files -> the tables in docs/RESULTS.md
 ```
 
-Sent minus stored for runs already done, from the raw files only (writes `results/missing_check.csv`):
-
-```bash
-python loadtest/missing_check.py results
-```
+`run_stats.csv` has one line per run, including sent, stored and missing; lines of runs whose folder is no longer on
+this machine are kept. Then zip the new run folders into the team Drive archive and record the checksum.
 
 # Load generator (HTTP)
 

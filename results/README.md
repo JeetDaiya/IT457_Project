@@ -10,7 +10,7 @@ Measured runs. Git holds the small, cited files; the full run folders are archiv
 - `name_map.csv`: old folder name, new folder name and database run tag of the 39 Stage A runs (folders were renamed on 2026-11-11).
 
 ## In the team Drive (archive)
-- Link: **TODO: add the Drive link after the upload.**
+- Link: https://drive.google.com/file/d/1fQMfVxRnC0XsLtTh6tqHOMqH_axTB7xx/view?usp=sharing
 - File: `it457-stage-a-raw-results.zip` (4.4 MB, 39 run folders, 321 entries, made 2026-11-11).
 - SHA-256: `8878176c9a2467ba2cd2f68af10746b64abb2b7f40890d4fc97f7521dea62533`
 - Check it with `sha256sum it457-stage-a-raw-results.zip`; restore with `unzip it457-stage-a-raw-results.zip -d results/`
