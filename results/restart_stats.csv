@@ -1,0 +1,4 @@
+run,stage,kind,rate,repeat,gap_s,gap_from_utc,gap_to_utc,stop_requested_utc,stop_returned_utc,start_requested_utc,start_returned_utc,seconds_above_110pct,peak_stored_per_s
+2026-11-10_A_mqtt-100conn-restart_100per-s_run1,A,mqtt-100conn-restart,100,1,21.16,18:34:13.494,18:34:34.649,2026-11-10T18:34:03.428Z,2026-11-10T18:34:13.622Z,2026-11-10T18:34:33.626Z,2026-11-10T18:34:34.271Z,5,735
+2026-11-10_A_mqtt-100conn-restart_100per-s_run2,A,mqtt-100conn-restart,100,2,21.05,18:37:01.355,18:37:22.405,2026-11-10T18:36:51.288Z,2026-11-10T18:37:01.462Z,2026-11-10T18:37:21.468Z,2026-11-10T18:37:22.114Z,4,760
+2026-11-10_A_mqtt-100conn-restart_100per-s_run3,A,mqtt-100conn-restart,100,3,21.08,18:39:55.591,18:40:16.676,2026-11-10T18:39:45.530Z,2026-11-10T18:39:55.722Z,2026-11-10T18:40:15.727Z,2026-11-10T18:40:16.381Z,5,753

@@ -27,8 +27,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
     ports:
       # Host port is overridable: a local PostgreSQL often already owns 5432.
+      # Loopback only: the default password is weak and the laptop shares a home Wi-Fi.
       # Stage B (EC2): decide whether to publish this at all when we get there.
-      - "${POSTGRES_HOST_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -40,7 +41,7 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2
     ports:
-      - "1883:1883"
+      - "${BIND_IP:-0.0.0.0}:1883:1883"
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto-data:/mosquitto/data
@@ -49,7 +50,8 @@ services:
     <<: *app
     command: ["python", "-m", "app.main", "api"]
     ports:
-      - "8000:8000"
+      # BIND_IP limits who can connect (laptop: its Tailscale address); default is all interfaces.
+      - "${BIND_IP:-0.0.0.0}:8000:8000"
 
   worker:
     <<: *app

@@ -17,3 +17,7 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Raw run folders stay local and in the team Drive archive (see results/README.md); only settings.json is tracked
+results/20*/*
+!results/20*/settings.json
