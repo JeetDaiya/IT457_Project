@@ -1,0 +1,14 @@
+{
+  "host": "http://52.66.47.235:8000",
+  "rate": 500,
+  "duration": 120,
+  "tag": "bh500r3",
+  "devices": 100,
+  "seed": 1,
+  "pool": 1000,
+  "timeout_s": 2.0,
+  "start_utc": "2026-11-12T10:14:48.389Z",
+  "locust": "2.47.0",
+  "python": "3.12.16",
+  "machine": "aarch64"
+}
