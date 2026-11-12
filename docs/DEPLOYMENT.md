@@ -2,7 +2,7 @@
 
 ## Currently running AWS resources
 
-**None** — Stage A runs locally via Docker Compose.
+One team-owned EC2 instance in **Mumbai (`ap-south-1`)**, running the Stage B Compose stack since 2026-11-12 (see Stage B below). Nothing in `us-east-1` yet. Stage A ran locally via Docker Compose.
 
 ## Load generator (Oracle Cloud Always Free, outside AWS)
 
@@ -31,10 +31,13 @@ The Stage A laptop is behind Jio carrier-grade NAT (router WAN address `10.3.x.x
 
 ## Stage B (EC2)
 
-_Not yet deployed._ Same Compose file as Stage A.
+Same Compose file as Stage A. **Deployed 2026-11-12 on the team's EC2 instance in Mumbai (`ap-south-1`)**, not `us-east-1`: Ubuntu 24.04, x86_64, 2 vCPUs, 1.9 GiB RAM, 19 GB disk, Docker Engine and Compose plugin from Docker's apt repository (`ubuntu` is in the `docker` group after the next login; until then use `sudo docker`). The Oracle generator is also in Mumbai, so the generator-to-app path is short (a few ms, not the 200-250 ms planned for `us-east-1`); label every Stage B number accordingly (see `RESULTS.md`).
 
-- **Decide when deploying:** whether to publish Postgres (5432) on the VM at all. Anonymous MQTT (1883) must also be restricted by security group or given auth before the Oracle generator connects.
-- **Security group checklist:** allow 8000, 1883 and 22 only from the Oracle IP, and also allow **ICMP echo** from the Oracle IP, otherwise the baseline `ping.txt` will say "ping failed or is blocked" (see `GOTCHAS.md`).
+- **On the VM:** repo cloned to `~/IT457_Project` (main), `.env` created from `.env.example` with a generated Postgres password (mode 600, never committed), then `sudo docker compose --env-file .env -f infra/docker-compose.yml up -d --build`. `curl localhost:8000/health` answers `{"status":"ok"}`; Postgres is published on `127.0.0.1` only. The SSH key and the IPs stay out of the repo (`<ec2-ip>`, `<oracle-ip>`).
+- **Security group (inbound), only from the Oracle IP (`/32`):** TCP 8000, TCP 1883, and **ICMP echo** (otherwise `ping.txt` says "ping failed or is blocked", see `GOTCHAS.md`). SSH (22) only from the team's own addresses. Do **not** open 5432. Anonymous MQTT (1883) is acceptable only with that source restriction.
+- **RAM is tight (1.9 GiB):** watch `app_vmstat.txt` in each run folder; add a swap file before the 500 msg/s steps if memory runs out.
+- **Measured runs:** `loadtest/measure_run_remote.sh` (README section "Stage B"), run from the laptop; it reads the database over SSH on the VM.
+- **Open:** whether this is the final Stage B or a dry run before a `us-east-1` instance (team decision); EC2 hours and cost to be recorded when runs finish.
 
 ## Stage C (EC2 + managed services)
 
