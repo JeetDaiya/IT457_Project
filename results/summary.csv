@@ -62,3 +62,6 @@ date,stage,protocol,rate,repeat,avg_delay_ms,p95_delay_ms,lost_readings,notes
 2026-11-12,B,mqtt-100conn,500,1,2.31,3.11,0,"server time; client_rtt_avg_ms=2.3 client_rtt_p95_ms=2.6 ping_avg_ms=2.072 ok=60000 achieved_rate=500.0; stored=60000 missing=0"
 2026-11-12,B,mqtt-100conn,500,2,2.33,3.21,0,"server time; client_rtt_avg_ms=2.2 client_rtt_p95_ms=2.5 ping_avg_ms=2.420 ok=60000 achieved_rate=500.0; stored=60000 missing=0"
 2026-11-12,B,mqtt-100conn,500,3,2.37,3.34,0,"server time; client_rtt_avg_ms=2.3 client_rtt_p95_ms=2.6 ping_avg_ms=2.053 ok=60000 achieved_rate=500.0; stored=60000 missing=0"
+2026-11-13,B,mqtt-100conn-restart,100,1,2.15,2.39,0,"server time; client_rtt_avg_ms=2.4 client_rtt_p95_ms=2.6 ping_avg_ms=1.902 ok=12000 achieved_rate=100.0; stored=12000 missing=0"
+2026-11-13,B,mqtt-100conn-restart,100,2,2.21,2.48,0,"server time; client_rtt_avg_ms=2.3 client_rtt_p95_ms=2.6 ping_avg_ms=1.938 ok=12000 achieved_rate=100.0; stored=12000 missing=0"
+2026-11-13,B,mqtt-100conn-restart,100,3,2.15,2.41,0,"server time; client_rtt_avg_ms=2.3 client_rtt_p95_ms=2.6 ping_avg_ms=1.907 ok=12000 achieved_rate=100.0; stored=12000 missing=0"
