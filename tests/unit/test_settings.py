@@ -10,6 +10,7 @@ from app.rules import Limits
 from app.settings import Settings, load_settings
 
 DB_URL = "postgresql+psycopg2://user:secret@localhost:5432/minihs"
+QUEUE_URL = "https://sqs.ap-south-1.amazonaws.com/123456789012/mini-hs-readings"
 
 
 def env(**extra: str) -> dict[str, str]:
@@ -40,6 +41,8 @@ def test_database_url_is_taken_from_env():
         ("temperature_max", 38.0),
         ("seed_patients", 100),
         ("log_level", "INFO"),
+        ("input_mode", "mqtt"),
+        ("sqs_queue_url", ""),
     ],
 )
 def test_defaults_when_only_database_url_is_given(attribute, expected):
@@ -62,8 +65,12 @@ def test_every_value_can_be_overridden():
             TEMPERATURE_MAX="37.5",
             SEED_PATIENTS="20",
             LOG_LEVEL="DEBUG",
+            INPUT_MODE="sqs",
+            SQS_QUEUE_URL=QUEUE_URL,
         )
     )
+    assert settings.input_mode == "sqs"
+    assert settings.sqs_queue_url == QUEUE_URL
     assert settings.mqtt_host == "broker.internal"
     assert settings.mqtt_port == 8883
     assert settings.mqtt_topic == "devices/#"
@@ -112,6 +119,30 @@ def test_empty_database_url_raises_value_error():
 def test_missing_database_url_raises_even_if_other_values_are_set():
     with pytest.raises(ValueError):
         load_settings({"MQTT_HOST": "broker", "SEED_PATIENTS": "5"})
+
+
+# ---- INPUT_MODE ------------------------------------------------------------
+
+
+def test_sqs_mode_with_a_queue_url_is_accepted():
+    settings = load_settings(env(INPUT_MODE="sqs", SQS_QUEUE_URL=QUEUE_URL))
+    assert (settings.input_mode, settings.sqs_queue_url) == ("sqs", QUEUE_URL)
+
+
+@pytest.mark.parametrize("extra", [{}, {"SQS_QUEUE_URL": ""}, {"SQS_QUEUE_URL": "  "}])
+def test_sqs_mode_without_a_queue_url_raises_value_error(extra):
+    with pytest.raises(ValueError, match="SQS_QUEUE_URL"):
+        load_settings(env(INPUT_MODE="sqs", **extra))
+
+
+def test_mqtt_mode_does_not_need_a_queue_url():
+    assert load_settings(env(INPUT_MODE="mqtt")).sqs_queue_url == ""
+
+
+@pytest.mark.parametrize("mode", ["SQS", "kafka", ""])
+def test_unknown_input_mode_raises_value_error(mode):
+    with pytest.raises(ValueError, match="INPUT_MODE"):
+        load_settings(env(INPUT_MODE=mode, SQS_QUEUE_URL=QUEUE_URL))
 
 
 # ---- bad numbers -----------------------------------------------------------
