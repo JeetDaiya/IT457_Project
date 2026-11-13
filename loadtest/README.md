@@ -134,7 +134,11 @@ ORACLE=ubuntu@<oracle-ip> ORACLE_KEY=<key> APP=ubuntu@<ec2-ip> APP_KEY=<key> \
   `COLLECT_ONLY=<run folder>`.
 - **Needs in the security group:** TCP 8000 and 1883 and ICMP echo from the Oracle IP (see `docs/DEPLOYMENT.md`).
 - **Server time** is `stored_at - received_at` on the VM's clock; the client round trip and ping use the generator's clock. Never subtract across machines.
-- **Not covered yet:** a remote version of `restart_test.sh` (it stops the worker with `docker compose stop worker` on the stack host).
+- **Restart test on the VM:** `restart_test_remote.sh` is the remote version of `restart_test.sh`:
+  `ORACLE=... ORACLE_KEY=... APP=... APP_KEY=... ./loadtest/restart_test_remote.sh <repeat> [rate=100] [stop_after_s=40] [down_s=20]`.
+  It runs `measure_run_remote.sh` for MQTT with `STAGE=brestart` (tag `brestartm<rate>r<repeat>`), `STAGE_NAME=B` and `RUN_NOTE=restart`
+  (folder `<date>_B_mqtt-100conn-restart_...`), stops and starts the worker over SSH, and adds the same three files as the Stage A
+  version. Its step timestamps are taken on the VM, the clock of `stored_at`. The worker is always started again, even if the run fails.
 
 # Load generator (HTTP)
 
