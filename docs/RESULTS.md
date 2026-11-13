@@ -139,6 +139,20 @@ from the laptop with `loadtest/measure_run_remote.sh`; server time is read on th
 
 <!-- /result_tables -->
 
+### Restart test (MQTT, 100 msg/s, worker stopped for 20 s)
+
+Run on 2026-11-13 with `loadtest/restart_test_remote.sh`; the step times are taken on the VM's clock.
+
+<!-- result_tables: restart stage=B kind=mqtt-100conn-restart -->
+
+| Repeat | Longest gap between stored readings (s) | Sent | Stored | Missing | Lost formula | Seconds above 110% of the rate after restart | Peak stored per second |
+|---|---|---|---|---|---|---|---|
+| 1 | 21.81 | 12000 | 12000 | 0 | 0 | 15 | 260 |
+| 2 | 21.73 | 12000 | 12000 | 0 | 0 | 15 | 266 |
+| 3 | 21.74 | 12000 | 12000 | 0 | 0 | 14 | 270 |
+
+<!-- /result_tables -->
+
 ### Findings (Stage B)
 
 1. **Up to 100 msg/s nothing was lost, for HTTP or MQTT** (0 missing in all 18 runs). Server time is 2.6-3.9 ms on average,
@@ -147,17 +161,22 @@ from the laptop with `loadtest/measure_run_remote.sh`; server time is read on th
 2. **HTTP at 500 msg/s overloads this VM.** In all three repeats about two thirds of the 60,000 readings were stored
    (39,322 / 41,461 / 42,730), 56,487 were missing in total, and the generator saw 37,744-39,217 client timeouts (2 s) per run
    against 19,366-22,245 acknowledged. Server time rose to 29-37 ms (p95 108-143 ms) and the median round trip to 205-880 ms. Stage A
-   handled the same step with 5 missing readings in total and about 1 ms server time. On the VM the CPU sampled every 5 s was
-   about 70% busy (user and system) averaged over the run and the seconds around it, with no swap use, in the runs inspected
-   (HTTP repeats 1 and 3). **The cause is not isolated:** a single `uvicorn` process (one core) is the likely limit; the
-   `t3.small` CPU-credit balance was not checked.
-3. **MQTT with 100 connections stored all 60,000 readings at 500 msg/s in all three repeats** with server time 2.3 ms (p95 3.1-3.3 ms).
-   Read this with care: the generator's round trip ends at the broker's acknowledgement (2.2 ms), and server time starts when the
-   worker picks a message up, so neither includes the wait inside the broker. The run was complete only when the worker had stored everything.
+   handled the same step with 5 missing readings in total and about 1 ms server time. **The cause is that the VM ran out of CPU:**
+   the whole 2-vCPU VM was about 85% busy (`vmstat` of all 24 runs), with no swap use and no CPU-credit throttling
+   (CloudWatch). A single `uvicorn` process using one core was too narrow an explanation. A larger instance or more `uvicorn`
+   workers was not tried.
+3. **MQTT with 100 connections stored all 60,000 readings at 500 msg/s in all three repeats, but only because the broker queued
+   the surplus.** The worker stores about 210 readings/s, so storing finished about 160 s after the 120 s of sending. Server time
+   (2.3 ms, p95 3.1-3.3 ms) and the generator's round trip (2.2 ms, ending at the broker's acknowledgement) both leave out the wait inside
+   the broker. At 500 msg/s this VM is therefore past the point where MQTT keeps up in real time; MQTT loses nothing here, but it is late.
 4. **MQTT's round trip is shorter than HTTP's** at every rate (2.2-2.4 ms against 8.4-8.5 ms up to 100 msg/s) for the same
    reason as in Stage A: it does not include the save. Server time is the fair comparison, and it is about equal up to
    100 msg/s.
-5. **The round trips are not the Mumbai to us-east-1 distance.** Generator and VM are both in Mumbai (ping 2 ms). Compare server
+5. **Restart test: nothing lost, outage about 22 s.** With the worker stopped for 20 s at 100 msg/s, Mosquitto kept the messages;
+   0 of 12,000 readings were missing in all three repeats, and the longest gap between stored readings was 21.73-21.81 s (Stage A:
+   21.05-21.16 s). The backlog was stored at about 260-270 readings/s for 14-15 s (Stage A: 735-760/s for 4-5 s), because the VM
+   saves a reading more slowly (finding 1). The outage itself is the same on both stages; only the catch-up takes about three times as long.
+6. **The round trips are not the Mumbai to us-east-1 distance.** Generator and VM are both in Mumbai (ping 2 ms). Compare server
    time and the shape of the curves with Stage C, not the absolute round trips, and say "Stage B (Mumbai)" wherever these numbers are used.
 
 ### What these numbers cannot say (Stage B)
@@ -165,8 +184,27 @@ from the laptop with `loadtest/measure_run_remote.sh`; server time is read on th
 - One VM size, one day, one run of each setting (three repeats). The VM was `t3.small`; a larger instance or more `uvicorn`
   workers would move the HTTP 500 msg/s result, and this was not tried.
 - Server time is on the VM's clock; the client round trip and ping are on the generator's clock. They are never subtracted.
-- No restart test was run on Stage B (`restart_test.sh` is Stage A only).
-- The cost of the instance (launched 2026-11-12 13:31 IST) is not recorded here yet.
+- The restart test was run with MQTT only (as on Stage A), three repeats at 100 msg/s.
+- The cause of the HTTP 500 msg/s failure is the VM's CPU, found from `vmstat` and CloudWatch; the effect of a larger instance or more workers was not measured.
+
+### Cost (Stage B)
+
+**Total Stage B cost: $0.90** (AWS bill for November 2026 up to 2026-11-13, before credits, from the billing console). It is the
+whole bill for the account over the Stage B period, taken as the Stage B cost:
+
+| Bill line | Amount |
+|---|---|
+| EC2 - Compute (5.754 instance hours, `t3.small`, Mumbai) | $0.13 |
+| EC2 - Other | $0.73 |
+| Virtual Private Cloud (public IPv4 address) | $0.03 |
+| RDS, S3, Secrets Manager | $0.00 |
+| **Total** | **$0.90** |
+
+Check against usage times list price: the instance line is 5.754 h at about $0.0226/h, and the VPC line is the public IPv4
+address at about $0.005/h for the same hours; both agree. EC2 - Other (disk and related charges) was not broken down by usage
+type, so what it contains is not known; its disk part for this one VM would be about $0.06 a day. Read the bill as a check on the
+calculator, not as a separate result. The VM is stopped between sessions; while stopped it still bills its disk, and the public
+IPv4 address is charged while it exists.
 
 ## Stage C (EC2 + RDS + IoT Core + SQS)
 
