@@ -23,11 +23,11 @@ tables. Per-run numbers: `results/run_stats.csv` and `restart_stats.csv`; the ra
 
 | | Stage A | Stage B | Stage C |
 |---|---|---|---|
-| App runs on | Laptop, Docker Compose | One EC2 VM (us-east-1), same Compose file | EC2 plus RDS, IoT Core and SQS |
+| App runs on | Laptop, Docker Compose | One EC2 VM (`t3.small`) in **Mumbai (`ap-south-1`)**, same Compose file | EC2 plus RDS, IoT Core and SQS |
 | Load generator | Oracle Cloud ARM box, Mumbai (outside AWS) | same | same |
-| Network path | Tailscale tunnel over home Wi-Fi, direct path, ping about 12-14 ms | Internet, expected about 200-250 ms | Internet, expected about 200-250 ms |
+| Network path | Tailscale tunnel over home Wi-Fi, direct path, ping about 12-14 ms | Internet, same city, ping about 2 ms | Internet, expected about 200-250 ms if the VM is in `us-east-1` |
 | Encryption | Plain HTTP and plain MQTT (port 1883) inside the Tailscale tunnel | Plain HTTP and plain MQTT | MQTT over TLS (IoT Core requires it) |
-| Status | **Done** (2026-11-10) | Not run yet | Not run yet |
+| Status | **Done** (2026-11-10) | **Done** (2026-11-12, Mumbai; a `us-east-1` repeat is a team decision) | Not run yet |
 
 ## Stage A (laptop)
 
@@ -118,9 +118,55 @@ many connections. Both sets are kept.
 
 ## Stage B (EC2 lift-and-shift)
 
-Not run yet. When runs exist, add the same two kinds of table (a `matrix` block with `stage=B`, a `restart` block if the
-restart test is repeated) and compare with Stage A: the code and the Compose file are the same, so any change in server
-time comes from the VM and any change in round trip mostly from the longer network path. Also record the EC2 hours and cost.
+Run on 2026-11-12 (24 runs: HTTP and MQTT with 100 connections, 10/50/100/500 msg/s, 3 repeats, 120 s each). **The VM is in
+Mumbai (`ap-south-1`), not `us-east-1`, and so is the generator**, so the network path is short (ping about 2 ms) and the round
+trips below say nothing about the Mumbai to us-east-1 distance. The VM is a `t3.small` (2 vCPUs, 2 GiB RAM, a 2 GiB swap file added;
+swap was not used), Ubuntu 24.04, the same Compose file as Stage A, one `uvicorn` process for the API and one worker. Runs were started
+from the laptop with `loadtest/measure_run_remote.sh`; server time is read on the VM's own clock.
+
+<!-- result_tables: matrix stage=B kinds=http,mqtt-100conn -->
+
+| Rate (msg/s) | Kind | Runs | Server time avg (ms) | Server time p95 (ms) | Round trip median (ms) | Round trip p95 (ms) | Fastest ping (ms) | Missing (sum) | Lost formula (sum) |
+|---|---|---|---|---|---|---|---|---|---|
+| 10 | http | 3 | 2.86 (2.77-2.92) | 3.60 (3.20-3.88) | 8.5 (8.4-8.8) | 12.2 (10.9-12.9) | 2.0 | 0 | 0 |
+| 10 | mqtt-100conn | 3 | 2.96 (2.81-3.26) | 4.37 (3.51-5.33) | 2.4 (2.4-2.4) | 2.8 (2.8-2.9) | 2.0 | 0 | 0 |
+| 50 | http | 3 | 3.22 (3.05-3.45) | 3.81 (3.52-3.98) | 8.4 (8.4-8.5) | 12.3 (11.8-13.0) | 2.0 | 0 | 0 |
+| 50 | mqtt-100conn | 3 | 2.96 (2.68-3.29) | 4.69 (3.56-6.14) | 2.4 (2.3-2.4) | 3.0 (2.9-3.3) | 2.0 | 0 | 0 |
+| 100 | http | 3 | 3.86 (3.31-4.86) | 5.84 (4.05-8.73) | 8.5 (8.3-8.8) | 20.2 (13.5-30.6) | 2.0 | 0 | 0 |
+| 100 | mqtt-100conn | 3 | 2.64 (2.56-2.69) | 3.40 (3.12-3.63) | 2.3 (2.3-2.3) | 2.7 (2.6-2.7) | 2.0 | 0 | 0 |
+| 500 | http | 3 | 33.81 (28.68-36.61) | 131.33 (108.09-143.03) | 457.3 (204.7-880.3) | 1359.4 (979.6-1901.3) | 1.9 | 56487 | 55932 |
+| 500 | mqtt-100conn | 3 | 2.34 (2.31-2.37) | 3.22 (3.11-3.34) | 2.2 (2.2-2.2) | 2.6 (2.5-2.6) | 2.0 | 0 | 0 |
+
+<!-- /result_tables -->
+
+### Findings (Stage B)
+
+1. **Up to 100 msg/s nothing was lost, for HTTP or MQTT** (0 missing in all 18 runs). Server time is 2.6-3.9 ms on average,
+   about 3 times Stage A's at 50 and 100 msg/s (Stage A: 0.85-1.2 ms). Both stages run the same code and Compose file, so the
+   VM (a burstable `t3.small`) saves a reading more slowly than the laptop. At 10 msg/s the two are equal (about 2.9 ms).
+2. **HTTP at 500 msg/s overloads this VM.** In all three repeats about two thirds of the 60,000 readings were stored
+   (39,322 / 41,461 / 42,730), 56,487 were missing in total, and the generator saw 37,744-39,217 client timeouts (2 s) per run
+   against 19,366-22,245 acknowledged. Server time rose to 29-37 ms (p95 108-143 ms) and the median round trip to 205-880 ms. Stage A
+   handled the same step with 5 missing readings in total and about 1 ms server time. On the VM the CPU sampled every 5 s was
+   about 70% busy (user and system) averaged over the run and the seconds around it, with no swap use, in the runs inspected
+   (HTTP repeats 1 and 3). **The cause is not isolated:** a single `uvicorn` process (one core) is the likely limit; the
+   `t3.small` CPU-credit balance was not checked.
+3. **MQTT with 100 connections stored all 60,000 readings at 500 msg/s in all three repeats** with server time 2.3 ms (p95 3.1-3.3 ms).
+   Read this with care: the generator's round trip ends at the broker's acknowledgement (2.2 ms), and server time starts when the
+   worker picks a message up, so neither includes the wait inside the broker. The run was complete only when the worker had stored everything.
+4. **MQTT's round trip is shorter than HTTP's** at every rate (2.2-2.4 ms against 8.4-8.5 ms up to 100 msg/s) for the same
+   reason as in Stage A: it does not include the save. Server time is the fair comparison, and it is about equal up to
+   100 msg/s.
+5. **The round trips are not the Mumbai to us-east-1 distance.** Generator and VM are both in Mumbai (ping 2 ms). Compare server
+   time and the shape of the curves with Stage C, not the absolute round trips, and say "Stage B (Mumbai)" wherever these numbers are used.
+
+### What these numbers cannot say (Stage B)
+
+- One VM size, one day, one run of each setting (three repeats). The VM was `t3.small`; a larger instance or more `uvicorn`
+  workers would move the HTTP 500 msg/s result, and this was not tried.
+- Server time is on the VM's clock; the client round trip and ping are on the generator's clock. They are never subtracted.
+- No restart test was run on Stage B (`restart_test.sh` is Stage A only).
+- The cost of the instance (launched 2026-11-12 13:31 IST) is not recorded here yet.
 
 ## Stage C (EC2 + RDS + IoT Core + SQS)
 

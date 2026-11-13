@@ -111,6 +111,35 @@ python loadtest/result_tables.py results docs/RESULTS.md   # those two files -> 
 `run_stats.csv` has one line per run, including sent, stored and missing; lines of runs whose folder is no longer on
 this machine are kept. Then zip the new run folders into the team Drive archive and record the checksum.
 
+# Stage B: the stack runs on a remote VM (`measure_run_remote.sh`)
+
+`measure_run.sh` assumes the stack runs on the machine you start it on (Stage A). When the stack runs on the EC2 box,
+start `measure_run_remote.sh` from any control machine (the laptop). It drives the Oracle generator and the app host over SSH:
+
+```bash
+ORACLE=ubuntu@<oracle-ip> ORACLE_KEY=<key> APP=ubuntu@<ec2-ip> APP_KEY=<key> \
+  ./loadtest/measure_run_remote.sh <http|mqtt> <rate> <repeat>
+```
+
+- **Preflight (from the generator box, the path the run uses):** `GET /health` answers `{"status":"ok"}`, for MQTT port 1883 is
+  open, and the four containers (`api`, `mosquitto`, `postgres`, `worker`) run on the app host. Otherwise it stops before
+  sending anything. The result, five `/health` times and the app host's memory are saved in `network_check.txt`
+  (both public addresses replaced by `<oracle-ip>` and `<app-ip>`). There is no Wi-Fi or Tailscale check.
+- **Run, copy back, database numbers, `summary.csv`:** as for `measure_run.sh`. The database is read with
+  `ssh <app> sudo docker compose ... exec -T postgres psql`, so `APP_DIR` (default `IT457_Project`, relative to the VM user's
+  home) must point at the repo with the `.env` of the running stack, and the VM user needs passwordless `sudo`.
+- **Different files:** `app_vmstat.txt` (VM CPU and memory every 5 s) instead of `laptop_vmstat.txt`.
+- **Env:** `STAGE` defaults to `b` (tag `<stage><h|m><rate>r<repeat>`; folder `<date>_B_...`), `TARGET` (host the generator
+  calls, default the host part of `APP`), `CONNECTIONS`, `STAGE_NAME`, `RUN_NOTE`, `APP_DIR`, `REMOTE_ROOT`, `LOCAL_ROOT`,
+  `COLLECT_ONLY=<run folder>`.
+- **Needs in the security group:** TCP 8000 and 1883 and ICMP echo from the Oracle IP (see `docs/DEPLOYMENT.md`).
+- **Server time** is `stored_at - received_at` on the VM's clock; the client round trip and ping use the generator's clock. Never subtract across machines.
+- **Restart test on the VM:** `restart_test_remote.sh` is the remote version of `restart_test.sh`:
+  `ORACLE=... ORACLE_KEY=... APP=... APP_KEY=... ./loadtest/restart_test_remote.sh <repeat> [rate=100] [stop_after_s=40] [down_s=20]`.
+  It runs `measure_run_remote.sh` for MQTT with `STAGE=brestart` (tag `brestartm<rate>r<repeat>`), `STAGE_NAME=B` and `RUN_NOTE=restart`
+  (folder `<date>_B_mqtt-100conn-restart_...`), stops and starts the worker over SSH, and adds the same three files as the Stage A
+  version. Its step timestamps are taken on the VM, the clock of `stored_at`. The worker is always started again, even if the run fails.
+
 # Load generator (HTTP)
 
 Runs on the Oracle ARM machine in Mumbai, never on a machine being migrated. On the Oracle box use

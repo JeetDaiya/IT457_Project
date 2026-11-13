@@ -1,0 +1,16 @@
+{
+  "host": "52.66.47.235",
+  "port": 1883,
+  "rate": 100,
+  "duration": 120,
+  "tag": "bm100r2",
+  "devices": 100,
+  "seed": 1,
+  "connections": 100,
+  "inflight": 200,
+  "timeout_s": 2.0,
+  "start_utc": "2026-11-12T10:38:03.814Z",
+  "paho": "1.6.1",
+  "python": "3.12.16",
+  "machine": "aarch64"
+}
