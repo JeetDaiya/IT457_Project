@@ -26,7 +26,7 @@ Dependencies point inward only: `api` / `mqtt_in` / `sqs_in` → `service` → `
 | Domain | `app/rules.py` | `Reading` (validation ranges), `Limits`, `is_abnormal()`. Imports nothing from the app |
 | Configuration | `app/settings.py` | `Settings` and `load_settings()` (environment → settings); `Settings.limits()` returns `Limits` |
 | Application | `app/service.py` | `process_reading()` plus the ports it needs: `ReadingStore`, `Clock` |
-| Infrastructure | `app/db.py` | `PostgresReadingStore` (SQLAlchemy Core + psycopg2), schema init, patient seeding, `SystemClock` |
+| Infrastructure | `app/db.py` | `PostgresReadingStore` (SQLAlchemy Core + psycopg2), schema init, patient seeding, `SystemClock`; `build_engine` sets libpq connect and TCP timeouts so a dropped connection fails in about a minute |
 | Interface | `app/api.py` | Thin FastAPI routers: call the injected processor, map outcome → HTTP status |
 | Interface | `app/mqtt_in.py` | `run()` subscribes to the topic at QoS 1 (persistent session) and reconnects; `handle_message()` parses, calls the injected processor and never raises. paho sends the ack after it returns |
 | Interface | `app/sqs_in.py` | Stage C. `run()` long-polls the queue (single thread); `poll_once()` receives up to 10 messages and deletes the finished ones in one call; `handle_body()` parses and calls the injected processor and returns whether the message may be deleted. Invalid readings and unknown patients are deleted, any other error leaves the message for SQS to redeliver |
