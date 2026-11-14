@@ -30,10 +30,12 @@ LAG_LIMIT_MS = 50.0
 RATE_LIMIT = 0.99
 CONNECT_TIMEOUT_S = 10.0
 SWEEP_S = 0.1
+# AWS IoT Core allows 100 publishes per second per connection (not adjustable)
+IOT_PUBLISH_LIMIT = 100
 
 
-def topic(device_id: str) -> str:
-    return f"vitals/{device_id}"
+def topic(device_id: str, prefix: str = "vitals") -> str:
+    return f"{prefix}/{device_id}"
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -55,6 +57,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=0,
         help="max unacknowledged messages per connection (default 2 x rate)",
     )
+    parser.add_argument(
+        "--topic-prefix", default="vitals", help="topic is <prefix>/<device_id>"
+    )
+    parser.add_argument(
+        "--client-id-prefix",
+        default=None,
+        help="client IDs <prefix>-1, <prefix>-2, ... (default <tag>-gen-<n>, n from 0)",
+    )
+    parser.add_argument("--cafile", help="TLS: CA certificate (PEM); turns TLS on")
+    parser.add_argument("--certfile", help="TLS: client certificate (PEM)")
+    parser.add_argument("--keyfile", help="TLS: client private key (PEM)")
     opts = parser.parse_args(argv)
     if opts.rate < 1 or opts.duration < 1:
         parser.error("--rate and --duration must be at least 1")
@@ -66,6 +79,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error("--connections must be between 1 and --devices")
     if opts.inflight < 0:
         parser.error("--inflight must not be negative")
+    if bool(opts.certfile) != bool(opts.keyfile):
+        parser.error("--certfile and --keyfile must be given together")
+    for name in ("cafile", "certfile", "keyfile"):
+        path = getattr(opts, name)
+        if path and not Path(path).is_file():
+            parser.error(f"--{name} not found: {path}")
+    if _uses_tls(opts) and opts.connections * IOT_PUBLISH_LIMIT < opts.rate:
+        parser.error(
+            f"{opts.rate} msg/s needs at least {math.ceil(opts.rate / IOT_PUBLISH_LIMIT)} "
+            f"connections with TLS (IoT Core allows {IOT_PUBLISH_LIMIT} publishes/s per connection)"
+        )
     if (Path(opts.out_dir) / "generator_log.csv").exists():
         parser.error(f"{opts.out_dir} already holds a run; raw results are kept")
     return opts
@@ -152,10 +176,24 @@ class _Run:
             return bool(self._pending)
 
 
+def _uses_tls(opts: argparse.Namespace) -> bool:
+    return bool(opts.cafile or opts.certfile)
+
+
+def _client_id(index: int, opts: argparse.Namespace) -> str:
+    if opts.client_id_prefix:
+        return f"{opts.client_id_prefix}-{index + 1}"
+    return f"{opts.tag}-gen-{index}"
+
+
 def _make_client(index: int, opts: argparse.Namespace, run: _Run):
     client = mqtt.Client(
-        client_id=f"{opts.tag}-gen-{index}", clean_session=True, userdata=index
+        client_id=_client_id(index, opts), clean_session=True, userdata=index
     )
+    if _uses_tls(opts):
+        client.tls_set(
+            ca_certs=opts.cafile, certfile=opts.certfile, keyfile=opts.keyfile
+        )
     client.max_inflight_messages_set(opts.inflight or 2 * opts.rate)
     client.max_queued_messages_set(0)
     client.reconnect_delay_set(min_delay=1, max_delay=5)
@@ -204,12 +242,19 @@ def _close(clients: list) -> None:
         client.disconnect()
 
 
-def _send(run: _Run, client, conn: int, reading: dict, payload: str) -> float:
+def _send(
+    run: _Run,
+    client,
+    conn: int,
+    reading: dict,
+    payload: str,
+    prefix: str = "vitals",
+) -> float:
     """Publish one reading and return the send time on the generator's own clock."""
     t0 = time.perf_counter()
     item = (reading["device_id"], reading["seq"], reading["sent_at"], t0)
     try:
-        info = client.publish(topic(reading["device_id"]), payload, qos=1)
+        info = client.publish(topic(reading["device_id"], prefix), payload, qos=1)
     except Exception:  # noqa: BLE001 - a failed send must never stop the loop
         run.failed(item)
         return t0
@@ -246,6 +291,9 @@ def run(opts: argparse.Namespace) -> dict:
         "connections": opts.connections,
         "inflight": inflight,
         "timeout_s": TIMEOUT_S,
+        "tls": _uses_tls(opts),
+        "topic_prefix": opts.topic_prefix,
+        "client_id_prefix": opts.client_id_prefix,
         "start_utc": utc_stamp(datetime.now(UTC)),
         "paho": paho.mqtt.__version__,
         "python": platform.python_version(),
@@ -277,7 +325,9 @@ def run(opts: argparse.Namespace) -> dict:
             reading = make_reading(
                 rng, opts.tag, index + 1, seqs[index], datetime.now(UTC)
             )
-            t0 = _send(state, clients[conn], conn, reading, to_json(reading))
+            t0 = _send(
+                state, clients[conn], conn, reading, to_json(reading), opts.topic_prefix
+            )
             lags.append(t0 - due)
             sent_at.append(t0)
 

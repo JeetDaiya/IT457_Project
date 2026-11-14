@@ -2,6 +2,8 @@
 # One MQTT run: ./loadtest/run_mqtt.sh <stage> <rate> <repeat> <broker-host> [port]
 # Env: OUT_ROOT (default results/), DURATION in seconds (default 120), CONNECTIONS (default 1),
 #      PYTHON (default python), STAGE_NAME and RUN_NOTE (folder name only; see run_name.sh).
+#      Stage C (IoT Core, TLS on 8883), each only when set: CAFILE, CERTFILE, KEYFILE (paths),
+#      TOPIC_PREFIX (mini-hs/vitals), CLIENT_ID_PREFIX (mini-hs-device).
 set -u
 
 if [ $# -lt 4 ] || [ $# -gt 5 ]; then
@@ -21,6 +23,13 @@ mkdir -p "$out"
 
 ping -c 20 -q "$host" > "$out/ping.txt" 2>&1 || echo "ping failed or is blocked" >> "$out/ping.txt"
 
+extra=()
+[ -n "${CAFILE:-}" ] && extra+=(--cafile "$CAFILE")
+[ -n "${CERTFILE:-}" ] && extra+=(--certfile "$CERTFILE")
+[ -n "${KEYFILE:-}" ] && extra+=(--keyfile "$KEYFILE")
+[ -n "${TOPIC_PREFIX:-}" ] && extra+=(--topic-prefix "$TOPIC_PREFIX")
+[ -n "${CLIENT_ID_PREFIX:-}" ] && extra+=(--client-id-prefix "$CLIENT_ID_PREFIX")
+
 cd "$root" && "${PYTHON:-python}" -m loadtest.mqtt_generator --host "$host" --port "$port" \
     --rate "$rate" --duration "${DURATION:-120}" --connections "${CONNECTIONS:-1}" \
-    --tag "${stage}m${rate}r${repeat}" --out-dir "$out"
+    --tag "${stage}m${rate}r${repeat}" --out-dir "$out" ${extra[@]+"${extra[@]}"}

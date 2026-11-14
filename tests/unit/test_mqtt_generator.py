@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import csv
 import json
+import shutil
+import ssl
+import subprocess
 import threading
 from collections import defaultdict
 
@@ -86,6 +89,9 @@ class FakeClient:
 
     def disconnect(self):
         self.stopped = True
+
+    def tls_set(self, ca_certs=None, certfile=None, keyfile=None, **_):
+        self.calls["tls"] = (ca_certs, certfile, keyfile)
 
     def max_inflight_messages_set(self, n):
         self.calls["inflight"] = (n,)
@@ -224,6 +230,106 @@ def test_refuses_out_dir_with_existing_log(tmp_path):
 
 def test_topic():
     assert gen.topic("t1-dev-0007") == "vitals/t1-dev-0007"
+    assert gen.topic("d-1", "mini-hs/vitals") == "mini-hs/vitals/d-1"
+
+
+# ---- Stage C options: TLS, topic prefix, client IDs ------------------------
+
+
+@pytest.fixture
+def pem(tmp_path):
+    """Three placeholder files; the fake client never reads them."""
+    paths = {}
+    for name in ("ca", "cert", "key"):
+        path = tmp_path / f"{name}.pem"
+        path.write_text("not a real file\n")
+        paths[name] = str(path)
+    return paths
+
+
+def tls_args(tmp_path, pem, *extra, **kw):
+    return args(
+        tmp_path, "--cafile", pem["ca"], "--certfile", pem["cert"],
+        "--keyfile", pem["key"], *extra, **kw,
+    )  # fmt: skip
+
+
+def test_new_options_default_to_stage_a_and_b_behaviour(env, tmp_path):
+    o = args(tmp_path)
+    assert (o.topic_prefix, o.client_id_prefix) == ("vitals", None)
+    assert (o.cafile, o.certfile, o.keyfile) == (None, None, None)
+    gen.run(o)
+    assert env.clients[0].client_id == "t1-gen-0"
+    assert "tls" not in env.clients[0].calls
+    assert {p["topic"].split("/")[0] for p in env.publishes} == {"vitals"}
+    settings = json.loads((tmp_path / "out" / "settings.json").read_text())
+    assert settings["tls"] is False
+    assert (settings["topic_prefix"], settings["client_id_prefix"]) == ("vitals", None)
+
+
+def test_stage_c_names_and_tls_files(env, tmp_path, pem):
+    o = tls_args(
+        tmp_path, pem, "--connections", 3,
+        "--topic-prefix", "mini-hs/vitals", "--client-id-prefix", "mini-hs-device",
+    )  # fmt: skip
+    gen.run(o)
+    assert [c.client_id for c in env.clients] == [
+        f"mini-hs-device-{n}" for n in (1, 2, 3)
+    ]
+    assert all(
+        c.calls["tls"] == (pem["ca"], pem["cert"], pem["key"]) for c in env.clients
+    )
+    assert all(p["topic"].startswith("mini-hs/vitals/") for p in env.publishes)
+    assert all(p["qos"] == 1 for p in env.publishes)
+
+
+def test_settings_json_records_tls_but_no_paths(env, tmp_path, pem):
+    gen.run(tls_args(tmp_path, pem, "--client-id-prefix", "mini-hs-device"))
+    text = (tmp_path / "out" / "settings.json").read_text()
+    settings = json.loads(text)
+    assert settings["tls"] is True
+    assert settings["client_id_prefix"] == "mini-hs-device"
+    assert str(tmp_path) not in text.replace(str(tmp_path / "out"), "")
+
+
+@pytest.mark.parametrize("missing", ["cert", "key"])
+def test_certfile_and_keyfile_must_come_together(tmp_path, pem, missing):
+    flag = {"cert": "--certfile", "key": "--keyfile"}
+    both = {"--cafile": pem["ca"], "--certfile": pem["cert"], "--keyfile": pem["key"]}
+    both.pop(flag[missing])
+    extra = [part for item in both.items() for part in item]
+    with pytest.raises(SystemExit) as exc:
+        args(tmp_path, *extra)
+    assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("flag", ["--cafile", "--certfile", "--keyfile"])
+def test_missing_tls_file_exits_2(tmp_path, pem, flag, capsys):
+    given = {"--cafile": pem["ca"], "--certfile": pem["cert"], "--keyfile": pem["key"]}
+    given[flag] = str(tmp_path / "nope.pem")
+    extra = [part for item in given.items() for part in item]
+    with pytest.raises(SystemExit) as exc:
+        args(tmp_path, *extra)
+    assert exc.value.code == 2
+    assert "nope.pem" in capsys.readouterr().err
+
+
+def test_tls_needs_one_connection_per_100_msg_per_s(tmp_path, pem, capsys):
+    with pytest.raises(SystemExit) as exc:
+        tls_args(tmp_path, pem, rate=500, duration=1)  # 1 connection, 500/s
+    assert exc.value.code == 2
+    assert "at least 5 connections" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        tls_args(tmp_path, pem, "--connections", 4, rate=500, duration=1)
+    assert tls_args(tmp_path, pem, "--connections", 5, rate=500, duration=1).rate == 500
+    assert (
+        tls_args(tmp_path, pem, "--connections", 100, rate=500, duration=1).rate == 500
+    )
+
+
+def test_plain_mqtt_keeps_single_connection_at_high_rate(tmp_path):
+    # Stages A and B run 500 msg/s over one connection; the limit is an IoT Core rule only.
+    assert args(tmp_path, rate=500, duration=1).connections == 1
 
 
 # ---- clients and connection ------------------------------------------------
@@ -463,3 +569,74 @@ def test_end_to_end_against_stub_broker(tmp_path):
     assert rows[0] == LOG_HEADER
     assert len(rows) == 41
     assert all(float(r[4]) >= 45 for r in rows[1:])
+
+
+# ---- real mutual TLS against the stub broker -------------------------------
+
+
+def _make_certs(folder):
+    """A throwaway CA plus a server certificate (IP 127.0.0.1) and a client certificate."""
+
+    def openssl(*cmd):
+        subprocess.run(["openssl", *cmd], cwd=folder, check=True, capture_output=True)
+
+    openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key",
+            "-out", "ca.pem", "-subj", "/CN=test-ca", "-days", "2")  # fmt: skip
+    (folder / "san.ext").write_text("subjectAltName=IP:127.0.0.1\n")
+    for name, ext in (("server", ["-extfile", "san.ext"]), ("client", [])):
+        openssl("req", "-newkey", "rsa:2048", "-nodes", "-keyout", f"{name}.key",
+                "-out", f"{name}.csr", "-subj", f"/CN={name}")  # fmt: skip
+        openssl("x509", "-req", "-in", f"{name}.csr", "-CA", "ca.pem", "-CAkey", "ca.key",
+                "-CAcreateserial", "-out", f"{name}.pem", "-days", "2", *ext)  # fmt: skip
+
+
+@pytest.fixture
+def certs(tmp_path):
+    if shutil.which("openssl") is None:
+        pytest.skip("openssl is not installed")
+    folder = tmp_path / "certs"
+    folder.mkdir()
+    _make_certs(folder)
+    return folder
+
+
+def _server_context(certs):
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(certs / "server.pem", certs / "server.key")
+    ctx.load_verify_locations(certs / "ca.pem")
+    ctx.verify_mode = (
+        ssl.CERT_REQUIRED
+    )  # like IoT Core: the client must show a certificate
+    return ctx
+
+
+def test_mutual_tls_end_to_end_against_stub_broker(tmp_path, certs):
+    with StubBroker(delay=0.01, tls=_server_context(certs)) as broker:
+        o = gen.parse_args(
+            ["--rate", "20", "--duration", "1", "--tag", "tls",
+             "--host", "127.0.0.1", "--port", str(broker.port), "--connections", "2",
+             "--cafile", str(certs / "ca.pem"), "--certfile", str(certs / "client.pem"),
+             "--keyfile", str(certs / "client.key"),
+             "--topic-prefix", "mini-hs/vitals", "--client-id-prefix", "mini-hs-device",
+             "--out-dir", str(tmp_path / "out")]
+        )  # fmt: skip
+        s = gen.run(o)
+        ids, topics = sorted(broker.client_ids), broker.topics
+    assert s["results"] == {"ok": 20, "duplicate": 0, "timeout": 0, "error": 0}
+    assert ids == ["mini-hs-device-1", "mini-hs-device-2"]
+    assert topics and all(t.startswith("mini-hs/vitals/") for t in topics)
+
+
+def test_server_that_requires_a_client_certificate_refuses_a_generator_without_one(
+    tmp_path, certs, monkeypatch
+):
+    monkeypatch.setattr(gen, "CONNECT_TIMEOUT_S", 1.0)
+    with StubBroker(tls=_server_context(certs)) as broker:
+        o = gen.parse_args(
+            ["--rate", "20", "--duration", "1", "--tag", "tls",
+             "--host", "127.0.0.1", "--port", str(broker.port),
+             "--cafile", str(certs / "ca.pem"), "--out-dir", str(tmp_path / "out")]
+        )  # fmt: skip
+        with pytest.raises(ConnectionError):
+            gen.run(o)
+        assert broker.publish_count == 0
