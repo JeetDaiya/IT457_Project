@@ -43,10 +43,27 @@ ON CONFLICT (device_id, seq) DO NOTHING
 RETURNING id""")
 
 
+# libpq options so a connection the server dropped (RDS restart, failover) fails in about a
+# minute. Without them the pool's health check can block for the kernel's TCP retry limit
+# (about 15 minutes), which froze the Stage C worker.
+_CONNECT_ARGS = {
+    "connect_timeout": 10,
+    "keepalives": 1,
+    "keepalives_idle": 30,  # idle connection: first probe after 30 s, ...
+    "keepalives_interval": 10,  # ... then every 10 s, ...
+    "keepalives_count": 3,  # ... dead after 3 missed probes (about 60 s)
+    "tcp_user_timeout": 30_000,  # ms; in-flight query with unacknowledged data
+}
+
+
 def build_engine(database_url: str) -> Engine:
     # Pool sized to match FastAPI's default worker-thread count (40), so threads rarely wait.
     return create_engine(
-        database_url, pool_size=20, max_overflow=20, pool_pre_ping=True
+        database_url,
+        pool_size=20,
+        max_overflow=20,
+        pool_pre_ping=True,
+        connect_args=_CONNECT_ARGS,
     )
 
 
