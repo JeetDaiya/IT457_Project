@@ -8,7 +8,9 @@
 #   RDS_HOST, RDS_USER, RDS_PASSWORD, RDS_DB   (RDS_PASSWORD must be URL-safe: letters and digits only,
 #                                               or percent-encode special characters)
 #   SQS_QUEUE_URL
-# Needs on the VM: the AWS RDS CA bundle (public), at RDS_CA_BUNDLE (default ~/global-bundle.pem):
+#   RDS_CA_BUNDLE   (full path, e.g. /home/ubuntu/global-bundle.pem; no default on purpose: under sudo,
+#                    ${HOME} resolves to /root, and Docker would then mount an empty directory instead)
+# Needs on the VM: the AWS RDS CA bundle (public):
 #   curl -o ~/global-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
 # AWS credentials: none in any file. boto3 reads the EC2 instance role through the metadata service
 # (IMDSv2 required, hop limit 2 so containers can reach it).
@@ -27,7 +29,7 @@ x-app: &app
     LOG_LEVEL: ${LOG_LEVEL:-INFO}
     SEED_PATIENTS: ${SEED_PATIENTS:-100}
   volumes:
-    - ${RDS_CA_BUNDLE:-${HOME}/global-bundle.pem}:/certs/global-bundle.pem:ro
+    - ${RDS_CA_BUNDLE:?set RDS_CA_BUNDLE in .env to the full path of the CA bundle}:/certs/global-bundle.pem:ro
   restart: unless-stopped
 
 services:
