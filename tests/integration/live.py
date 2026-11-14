@@ -81,3 +81,31 @@ def mqtt_publish(host: str, port: int, reading: dict[str, Any], times: int = 1) 
     finally:
         client.loop_stop()
         client.disconnect()
+
+
+def sqs_send(queue_url: str, reading: dict[str, Any], times: int = 1) -> None:
+    """Send the reading to the SQS queue `times` times, as the IoT Core rule would."""
+    import boto3  # only the Stage C tests need it, so the other tests run without boto3
+
+    client = boto3.client("sqs")
+    for _ in range(times):
+        client.send_message(QueueUrl=queue_url, MessageBody=json.dumps(reading))
+
+
+def wait_for_queue_empty(queue_url: str, timeout: float = 15) -> bool:
+    """Poll until the queue shows no waiting and no in-flight messages (the counts are
+    approximate in SQS and can lag a little). True when it drained before the deadline."""
+    import boto3
+
+    client = boto3.client("sqs")
+    names = ["ApproximateNumberOfMessages", "ApproximateNumberOfMessagesNotVisible"]
+    deadline = time.monotonic() + timeout
+    while True:
+        attributes = client.get_queue_attributes(
+            QueueUrl=queue_url, AttributeNames=names
+        )["Attributes"]
+        if all(int(attributes[name]) == 0 for name in names):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.5)

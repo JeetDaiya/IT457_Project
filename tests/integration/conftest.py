@@ -4,6 +4,7 @@ Point them at a stack with:
   TEST_BASE_URL=http://localhost:8000
   TEST_DATABASE_URL=postgresql://user:pass@localhost:5432/db
   TEST_MQTT_HOST=localhost        (TEST_MQTT_PORT defaults to 1883)
+  TEST_SQS_QUEUE_URL=https://sqs.<region>.amazonaws.com/<account>/<queue>   (Stage C only)
 Anything unset -> every integration test is skipped, so plain `pytest` stays fast.
 """
 
@@ -34,6 +35,12 @@ def base_url() -> str:
 @pytest.fixture(scope="session")
 def mqtt_target() -> tuple[str, int]:
     return _required("TEST_MQTT_HOST"), int(os.environ.get("TEST_MQTT_PORT", "1883"))
+
+
+@pytest.fixture(scope="session")
+def sqs_target() -> str:
+    """The queue URL Stage C's worker reads from; the SQS tests send straight to it."""
+    return _required("TEST_SQS_QUEUE_URL")
 
 
 @pytest.fixture(scope="session")

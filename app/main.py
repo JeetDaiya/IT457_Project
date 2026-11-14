@@ -39,10 +39,15 @@ def _run_api(settings: Settings) -> None:
 
 
 def _run_worker(settings: Settings) -> None:
-    from app import mqtt_in
+    # The input is the only thing that differs between stages: the MQTT broker (A, B) or
+    # an SQS queue fed by IoT Core (C). Imported here so each mode loads only what it uses.
+    if settings.input_mode == "sqs":
+        from app import sqs_in as source
+    else:
+        from app import mqtt_in as source
 
     _, process = _wire(settings)
-    mqtt_in.run(settings, process)
+    source.run(settings, process)
 
 
 _MODES: dict[str, Callable[[Settings], None]] = {"api": _run_api, "worker": _run_worker}

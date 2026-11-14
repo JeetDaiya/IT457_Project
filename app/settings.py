@@ -3,6 +3,8 @@ from dataclasses import dataclass
 
 from app.rules import Limits
 
+INPUT_MODES = ("mqtt", "sqs")
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -17,6 +19,8 @@ class Settings:
     temperature_max: float
     seed_patients: int
     log_level: str
+    input_mode: str
+    sqs_queue_url: str
 
     def limits(self) -> Limits:
         return Limits(
@@ -33,6 +37,12 @@ def load_settings(env: Mapping[str, str]) -> Settings:
     database_url = env.get("DATABASE_URL", "").strip()
     if not database_url:
         raise ValueError("DATABASE_URL is required")
+    input_mode = env.get("INPUT_MODE", "mqtt")
+    if input_mode not in INPUT_MODES:
+        raise ValueError(f"INPUT_MODE must be one of {INPUT_MODES}, got {input_mode!r}")
+    sqs_queue_url = env.get("SQS_QUEUE_URL", "").strip()
+    if input_mode == "sqs" and not sqs_queue_url:
+        raise ValueError("SQS_QUEUE_URL is required when INPUT_MODE is sqs")
     return Settings(
         database_url=database_url,
         mqtt_host=env.get("MQTT_HOST", "localhost"),
@@ -45,6 +55,8 @@ def load_settings(env: Mapping[str, str]) -> Settings:
         temperature_max=_number(env, "TEMPERATURE_MAX", "38.0", float),
         seed_patients=_number(env, "SEED_PATIENTS", "100", int),
         log_level=env.get("LOG_LEVEL", "INFO"),
+        input_mode=input_mode,
+        sqs_queue_url=sqs_queue_url,
     )
 
 

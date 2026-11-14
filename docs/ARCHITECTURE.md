@@ -3,7 +3,7 @@
 ## Folder layout
 
 ```
-app/          – FastAPI service (settings, db, rules, api, mqtt_in, main)
+app/          – FastAPI service (settings, db, rules, api, mqtt_in, sqs_in, main)
 infra/        – Dockerfile, docker-compose.yml, mosquitto/ config; AWS scripts/notes later
 loadtest/     – Locust and paho-mqtt generator scripts
 tests/        – unit/API tests (mocked) and tests/integration (running stack)
@@ -15,11 +15,11 @@ docs/         – Living docs (this file, GOTCHAS, CHANGELOG, etc.)
 
 ```
 HTTP (api.py)    ─┐
-                  ├─► process_reading() (service.py) ─► ReadingStore port ◄─ PostgresReadingStore (db.py)
-MQTT (mqtt_in.py)─┘
+MQTT (mqtt_in.py)─┼─► process_reading() (service.py) ─► ReadingStore port ◄─ PostgresReadingStore (db.py)
+SQS (sqs_in.py)  ─┘
 ```
 
-Dependencies point inward only: `api` / `mqtt_in` → `service` → `rules`, and `settings` → `rules`. `db` implements a port that `service` defines. Only `main.py` knows all the pieces and wires them together.
+Dependencies point inward only: `api` / `mqtt_in` / `sqs_in` → `service` → `rules`, and `settings` → `rules`. `db` implements a port that `service` defines. Only `main.py` knows all the pieces and wires them together.
 
 | Layer | File | Responsibility |
 |---|---|---|
@@ -29,9 +29,10 @@ Dependencies point inward only: `api` / `mqtt_in` → `service` → `rules`, and
 | Infrastructure | `app/db.py` | `PostgresReadingStore` (SQLAlchemy Core + psycopg2), schema init, patient seeding, `SystemClock` |
 | Interface | `app/api.py` | Thin FastAPI routers: call the injected processor, map outcome → HTTP status |
 | Interface | `app/mqtt_in.py` | `run()` subscribes to the topic at QoS 1 (persistent session) and reconnects; `handle_message()` parses, calls the injected processor and never raises. paho sends the ack after it returns |
+| Interface | `app/sqs_in.py` | Stage C. `run()` long-polls the queue (single thread); `poll_once()` receives up to 10 messages and deletes the finished ones in one call; `handle_body()` parses and calls the injected processor and returns whether the message may be deleted. Invalid readings and unknown patients are deleted, any other error leaves the message for SQS to redeliver |
 | Composition | `app/main.py` | Wires settings → store → processor; runs `api` or `worker` mode |
 
-`process_reading()` is the single shared function called by both the HTTP endpoint and the MQTT worker. Stage C adds an SQS queue between IoT Core and the worker; only the worker's input module changes.
+`process_reading()` is the single shared function called by the HTTP endpoint and by the worker, whichever input it reads. In Stage C an SQS queue sits between IoT Core and the worker: `main.py` picks `mqtt_in` or `sqs_in` from `INPUT_MODE` and nothing else changes.
 
 ## Interfaces (contract between teammates)
 
@@ -51,6 +52,7 @@ Types: `device_id` / `patient_ref` string; `heart_rate` / `spo2` / `seq` integer
 **Transport**
 - HTTP: `POST /readings` → `201` stored, `200` duplicate `(device_id, seq)`, `422` invalid range or unknown patient.
 - MQTT: publish to `vitals/<device_id>` at QoS 1; the worker subscribes to `vitals/#`. Invalid or duplicate messages are logged and acked, never raised out of the loop.
+- SQS (Stage C): the IoT Core rule `SELECT * FROM 'mini-hs/vitals/+'` puts each MQTT message into the queue with the same reading JSON as the body; the worker reads the queue (`INPUT_MODE=sqs`, `SQS_QUEUE_URL`, region from `AWS_DEFAULT_REGION`). A message is deleted after it is stored, found to be a duplicate or rejected as invalid; any other error leaves it in the queue and SQS delivers it again after the visibility timeout (30 s, no dead-letter queue).
 
 **Processor:** `main.py` builds one `process(reading) -> "stored" | "duplicate"` and injects it into `api.py` and the worker. Neither knows about the database.
 
@@ -66,7 +68,7 @@ Types: `device_id` / `patient_ref` string; `heart_rate` / `spo2` / `seq` integer
 
 ## Stage differences
 
-Settings-only; no forked code. See `CLAUDE.md` §Project context for the A / B / C table.
+Settings-only; no forked code. See `CLAUDE.md` §Project context for the A / B / C table. The worker's input is chosen by `INPUT_MODE` (`mqtt` in A and B, `sqs` in C) and the database by `DATABASE_URL` (RDS adds `?sslmode=verify-full&sslrootcert=...`); the worker stays a single consumer in every stage so the results compare directly.
 
 ## Compose stack (Stages A and B)
 
@@ -75,4 +77,4 @@ Settings-only; no forked code. See `CLAUDE.md` §Project context for the A / B /
 ## Tests
 
 - **Unit/API** (`tests/unit`, `tests/api`): mocked, no services needed. Plain `pytest`.
-- **Integration** (`tests/integration`, marker `integration`): black-box tests against a *running* stack, so the same files run on the laptop (A), the EC2 VM (B) and RDS (C, run from the VM). Set `TEST_BASE_URL`, `TEST_DATABASE_URL`, `TEST_MQTT_HOST` (and optionally `TEST_MQTT_PORT`); if any is unset they skip. Run with `pytest -m integration`. `test_http_path.py` is transport-independent; `test_mqtt_path.py` is the only file tied to the MQTT input, so Stage C adds an SQS variant of it and nothing else changes. Each test uses a unique `it-<uuid>-...` `device_id` and the run deletes its own rows afterwards. On the EC2 VM (only Docker is installed) they run inside a throwaway `python:3.12-slim` container with `--network host`, the repo mounted read-only and `localhost` URLs (command in `DEPLOYMENT.md`). The package has an `__init__.py` so its `conftest.py` does not shadow `tests/conftest.py`.
+- **Integration** (`tests/integration`, marker `integration`): black-box tests against a *running* stack, so the same files run on the laptop (A), the EC2 VM (B) and RDS (C, run from the VM). Set `TEST_BASE_URL`, `TEST_DATABASE_URL`, `TEST_MQTT_HOST` (and optionally `TEST_MQTT_PORT`); if any is unset they skip. Run with `pytest -m integration`. `test_http_path.py` is transport-independent; `test_mqtt_path.py` is the only file tied to the MQTT input, so Stage C adds `test_sqs_path.py` (sends straight to the queue; needs `TEST_SQS_QUEUE_URL` and AWS credentials, waits for the queue to drain) and, later, `test_iot_path.py` (publishes through IoT Core); if the first passes and the second fails, the problem is in front of the queue. On Stage C the two MQTT tests skip (no broker). Each test uses a unique `it-<uuid>-...` `device_id` and the run deletes its own rows afterwards. On the EC2 VM (only Docker is installed) they run inside a throwaway `python:3.12-slim` container with `--network host`, the repo mounted read-only and `localhost` URLs (command in `DEPLOYMENT.md`). The package has an `__init__.py` so its `conftest.py` does not shadow `tests/conftest.py`.
