@@ -161,21 +161,29 @@ Run on 2026-11-13 with `loadtest/restart_test_remote.sh`; the step times are tak
 2. **HTTP at 500 msg/s overloads this VM.** In all three repeats about two thirds of the 60,000 readings were stored
    (39,322 / 41,461 / 42,730), 56,487 were missing in total, and the generator saw 37,744-39,217 client timeouts (2 s) per run
    against 19,366-22,245 acknowledged. Server time rose to 29-37 ms (p95 108-143 ms) and the median round trip to 205-880 ms. Stage A
-   handled the same step with 5 missing readings in total and about 1 ms server time. **The cause is that the VM ran out of CPU:**
-   the whole 2-vCPU VM was about 85% busy (`vmstat` of all 24 runs), with no swap use and no CPU-credit throttling
-   (CloudWatch). A single `uvicorn` process using one core was too narrow an explanation. A larger instance or more `uvicorn`
-   workers was not tried.
-3. **MQTT with 100 connections stored all 60,000 readings at 500 msg/s in all three repeats, but only because the broker queued
-   the surplus.** The worker stores about 210 readings/s, so storing finished about 160 s after the 120 s of sending. Server time
-   (2.3 ms, p95 3.1-3.3 ms) and the generator's round trip (2.2 ms, ending at the broker's acknowledgement) both leave out the wait inside
-   the broker. At 500 msg/s this VM is therefore past the point where MQTT keeps up in real time; MQTT loses nothing here, but it is late.
+   handled the same step with 5 missing readings in total and about 1 ms server time. **The cause is that the VM ran out of CPU.**
+   `vmstat` every 5 s over the 24 runs shows the 2-vCPU VM about 84-86% busy in the three runs (user 58-59%, system 25-27%, idle 8-10%),
+   11-15 tasks waiting for a CPU on average and about 35,000 context switches per second; at 100 msg/s it was about 25% busy. Swap was
+   never used (0 in all 24 runs) and about 1.3 GiB of memory stayed free. The `t3.small` CPU-credit balance (CloudWatch) stayed at
+   about 35-38 and never neared 0, so credit throttling is ruled out. The VM stored a flat 305-340 readings/s and kept storing for about
+   30 s after the run ended. Rough estimate: about 5 ms of CPU per stored reading on about 1.8 usable cores gives about 350 readings/s.
+   **Not isolated:** how the 5 ms splits between web handling, kernel networking and the database was not measured. The whole VM was
+   busy, so more `uvicorn` workers on this VM would probably help little; a larger instance or cheaper requests were not tried.
+3. **MQTT with 100 connections lost nothing at 500 msg/s, but it did not keep up: the broker's queue absorbed the surplus.** All
+   60,000 readings were stored in all three repeats, with server time 2.3 ms (p95 3.1-3.3 ms). The single worker stored only about
+   190-225 readings/s (one thread, two database commits per reading, about 4.7 ms each), so storing finished 282-289 s after the first
+   reading arrived although the generator sent for 120 s: the last readings waited about 160 s in the broker. Server time (it starts
+   when the worker picks a message up) and the generator's round trip (2.2 ms, ending at the broker's acknowledgement) both leave this
+   wait out. The VM was only about 29% busy (47% idle, 19-20% disk wait), so the worker was waiting on the disk, not short of CPU. On
+   this VM MQTT's ceiling (about 210/s) was lower than HTTP's (about 330/s); the queue is why nothing was lost, since HTTP has none and
+   its clients gave up after 2 s. Source: first and last `stored_at` per run and readings stored per 30 s, read from the VM's database.
 4. **MQTT's round trip is shorter than HTTP's** at every rate (2.2-2.4 ms against 8.4-8.5 ms up to 100 msg/s) for the same
    reason as in Stage A: it does not include the save. Server time is the fair comparison, and it is about equal up to
    100 msg/s.
 5. **Restart test: nothing lost, outage about 22 s.** With the worker stopped for 20 s at 100 msg/s, Mosquitto kept the messages;
    0 of 12,000 readings were missing in all three repeats, and the longest gap between stored readings was 21.73-21.81 s (Stage A:
-   21.05-21.16 s). The backlog was stored at about 260-270 readings/s for 14-15 s (Stage A: 735-760/s for 4-5 s), because the VM
-   saves a reading more slowly (finding 1). The outage itself is the same on both stages; only the catch-up takes about three times as long.
+   21.05-21.16 s). The backlog (about 2,000 queued messages) was stored at peaks of 260 / 266 / 270 readings/s and stayed above 110% of
+   the sending rate for 14-15 s (Stage A: peaks 735-760/s, 4-5 s), because the VM saves a reading more slowly (finding 1). The outage itself is the same on both stages; only the catch-up takes about three times as long.
 6. **The round trips are not the Mumbai to us-east-1 distance.** Generator and VM are both in Mumbai (ping 2 ms). Compare server
    time and the shape of the curves with Stage C, not the absolute round trips, and say "Stage B (Mumbai)" wherever these numbers are used.
 
@@ -186,25 +194,30 @@ Run on 2026-11-13 with `loadtest/restart_test_remote.sh`; the step times are tak
 - Server time is on the VM's clock; the client round trip and ping are on the generator's clock. They are never subtracted.
 - The restart test was run with MQTT only (as on Stage A), three repeats at 100 msg/s.
 - The cause of the HTTP 500 msg/s failure is the VM's CPU, found from `vmstat` and CloudWatch; the effect of a larger instance or more workers was not measured.
+- The MQTT queue delay in finding 3 comes from `stored_at` on the VM's clock only.
+- The `vmstat` log stops when the generator stops, so it does not cover the time the MQTT worker spent draining the queue.
+- HTTP 500 msg/s repeat 1: the database held 42,842 rows when counted later, 112 more than `run_stats.csv` (42,730), because the server was
+  still working through its backlog; that run's "missing" (17,270) is overstated by 112. The other repeats match.
 
 ### Cost (Stage B)
 
-**Total Stage B cost: $0.90** (AWS bill for November 2026 up to 2026-11-13, before credits, from the billing console). It is the
-whole bill for the account over the Stage B period, taken as the Stage B cost:
+**About $0.09 for the performance test window** (EC2 hourly price x hours run), at **Mumbai** list prices, not `us-east-1`. Window:
+13:31:36 to 16:31:48 IST = 3.0033 h, including setup and the measured runs.
 
-| Bill line | Amount |
-|---|---|
-| EC2 - Compute (5.754 instance hours, `t3.small`, Mumbai) | $0.13 |
-| EC2 - Other | $0.73 |
-| Virtual Private Cloud (public IPv4 address) | $0.03 |
-| RDS, S3, Secrets Manager | $0.00 |
-| **Total** | **$0.90** |
+| Item | Price | Usage | Cost |
+|---|---|---|---|
+| EC2 `t3.small` | $0.0224/h | 3.0033 h | $0.067 |
+| Public IPv4 address | $0.005/h | 3.0033 h | $0.015 |
+| EBS gp3 (assumed 20 GB) | $0.0912/GB-month | 3.0033 h | about $0.0075 |
+| **Total** | | | **about $0.09** |
 
-Check against usage times list price: the instance line is 5.754 h at about $0.0226/h, and the VPC line is the public IPv4
-address at about $0.005/h for the same hours; both agree. EC2 - Other (disk and related charges) was not broken down by usage
-type, so what it contains is not known; its disk part for this one VM would be about $0.06 a day. Read the bill as a check on the
-calculator, not as a separate result. The VM is stopped between sessions; while stopped it still bills its disk, and the public
-IPv4 address is charged while it exists.
+**Check against the AWS bill** (November 2026 to 2026-11-13, before credits, from the billing console): $0.13 compute (5.754 instance
+hours x $0.0224 = $0.129, so the bill matches usage x list price), $0.73 EC2 - Other, $0.03 IPv4, and RDS, S3 and Secrets Manager at
+$0.00, about $0.90 in total. 5.754 h is more than the 3.0 h window because the VM also ran in later sessions. EC2 - Other is almost
+all disk: gp3 storage of 7.917 GB-months at $0.0912 = $0.72, because the disk existed for about 12 days, longer than the instance
+ran, and keeps billing while the VM is stopped. No data transfer, NAT gateway or snapshot charges appeared. The bill is a check on the
+calculation, not a separate finding. The VM is stopped between sessions; while stopped it still bills its disk, and the public IPv4
+address is charged while it exists.
 
 ## Stage C (EC2 + RDS + IoT Core + SQS)
 
