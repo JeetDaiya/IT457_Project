@@ -223,3 +223,22 @@ address is charged while it exists.
 
 Not run yet. To add: the same tables with `stage=C`, the B-to-C migration test (data size, copy time, downtime = longest
 gap between `stored_at` values at 100 msg/s, row counts, no `seq` gaps, sample rows identical) and the cost per million messages.
+
+### Cost so far (Stage C setup, estimate)
+
+**About $0.03 of compute for the setup session on 2026-11-14** (11:54 to 12:38 IST; EC2 and RDS each ran about 0.5 h), at **Mumbai** list
+prices before 18% GST. Hours are the session's own estimate, not read from the bill, and the Stage C measured runs have not happened.
+
+| Item | Price | Usage | Cost |
+|---|---|---|---|
+| EC2 `t3.small` | $0.0224/h | about 0.5 h | $0.011 |
+| Public IPv4 address | $0.005/h | about 0.5 h | $0.003 |
+| RDS `db.t4g.micro` instance | $0.025/h (RDS console) | about 0.5 h | $0.013 |
+| **Compute for the session** | | | **about $0.03** |
+
+Costs that run while the machines are stopped: the EC2's gp3 disk (about 20 GB, about $0.06 a day, same rate as Stage B) and RDS storage
+(gp3, 20 GiB; roughly $0.09 a day if the Mumbai rate is about $0.13 per GB-month, **a rate not yet confirmed**). Expected to be $0.00 or
+negligible: automated backups (free up to the database size), Database Insights Standard, the `aws/rds` encryption key, SQS (first million
+requests a month free), IoT Core test messages, and EC2-to-RDS traffic at these volumes. **Not yet counted:** the 2026-11-13 evening
+session (RDS creation, EC2 restart; times not recorded) and the measured runs. Replace this estimate with the Cost Explorer figures
+(RDS and EC2, daily, by usage type) once the runs are done.
