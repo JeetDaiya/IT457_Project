@@ -65,3 +65,4 @@ date,stage,protocol,rate,repeat,avg_delay_ms,p95_delay_ms,lost_readings,notes
 2026-11-13,B,mqtt-100conn-restart,100,1,2.15,2.39,0,"server time; client_rtt_avg_ms=2.4 client_rtt_p95_ms=2.6 ping_avg_ms=1.902 ok=12000 achieved_rate=100.0; stored=12000 missing=0"
 2026-11-13,B,mqtt-100conn-restart,100,2,2.21,2.48,0,"server time; client_rtt_avg_ms=2.3 client_rtt_p95_ms=2.6 ping_avg_ms=1.938 ok=12000 achieved_rate=100.0; stored=12000 missing=0"
 2026-11-13,B,mqtt-100conn-restart,100,3,2.15,2.41,0,"server time; client_rtt_avg_ms=2.3 client_rtt_p95_ms=2.6 ping_avg_ms=1.907 ok=12000 achieved_rate=100.0; stored=12000 missing=0"
+2026-11-14,C,mqtt-100conn-check,500,1,4.35,4.95,0,"server time; client_rtt_avg_ms=15.2 client_rtt_p95_ms=19.6 ping_avg_ms=1.380 ok=15000 achieved_rate=500.0; stored=15000 missing=0"

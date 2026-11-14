@@ -140,6 +140,43 @@ ORACLE=ubuntu@<oracle-ip> ORACLE_KEY=<key> APP=ubuntu@<ec2-ip> APP_KEY=<key> \
   (folder `<date>_B_mqtt-100conn-restart_...`), stops and starts the worker over SSH, and adds the same three files as the Stage A
   version. Its step timestamps are taken on the VM, the clock of `stored_at`. The worker is always started again, even if the run fails.
 
+# Stage C: IoT Core, SQS, RDS (`STAGE_C=1`)
+
+The same two scripts, MQTT only, with `STAGE_C=1`. Without it nothing changes for Stages A and B. The generator publishes over TLS
+(port 8883, one device certificate shared by all connections) to AWS IoT Core; an IoT rule puts each message in SQS and the worker on
+the EC2 stores it in RDS.
+
+```bash
+STAGE_C=1 IOT_ENDPOINT=<device-data-endpoint> IOT_CERT_DIR=/home/ubuntu/iot-certs \
+  IOT_CA=AmazonRootCA1.pem IOT_CERT=device.crt IOT_KEY=device.key \
+  ORACLE=ubuntu@<oracle-ip> ORACLE_KEY=<key> APP=ubuntu@<ec2-ip> APP_KEY=<key> \
+  ./loadtest/measure_run_remote.sh mqtt <rate> <repeat>        # or restart_test_remote.sh <repeat>
+```
+
+- **Certificates stay on the Oracle box** (`IOT_CERT_DIR`, absolute path, private key mode 600, mounted read-only in the generator container). They
+  are never copied back or committed. Get the endpoint under IoT Core, Settings, Device data endpoint.
+- **Short runs:** `DURATION=<seconds>` (default 120) is passed to the generator; the 30 s check used `STAGE=ccheck RUN_NOTE=check DURATION=30` so it does not share a tag or folder name with measured runs.
+- **Defaults in this mode:** `STAGE=c` (tag `cm<rate>r<n>`; restart test `crestart`), folder `<date>_C_mqtt-100conn_...`, 100 connections.
+  The generator uses client IDs `mini-hs-device-1..N` and topics `mini-hs/vitals/<device_id>` (the IoT policy and the rule
+  `SELECT * FROM 'mini-hs/vitals/+'` allow only those). Client IDs must be unique per connection: **never run two generators at once.**
+  With TLS the generator refuses to start when `connections < rate / 100` (IoT Core allows 100 publishes per second per connection).
+- **Before every run (stops with the reason otherwise):** `/health` on the app host (proves RDS is reachable), only `api` and `worker` running,
+  port 8883 open and the certificate files readable from the Oracle box, the queue empty (visible and not visible 0) and 0 `it-%` rows in RDS.
+  Empty the queue by hand in the console (wait about a minute), or give `mini-hs-ec2-worker-role` the `sqs:PurgeQueue` permission on the queue and
+  start with `PURGE=1`. Leftover `it-` rows come from the integration tests (`docs/GOTCHAS.md`).
+- **During the run:** `queue_depth.csv` (`time_utc,visible,not_visible`, app host clock) every 5 s from `loadtest/queue_depth.py`, which runs in a
+  throwaway container of the worker image so it uses the instance role. After the generator stops the script waits until three samples in a row
+  are 0/0 (at most `DRAIN_MAX_S`, default 900) before it reads the database.
+- **Database:** RDS is private, so `psql` runs in a `postgres:16` container on the app host (verified TLS, password and CA bundle from the VM's `.env`).
+  `db_summary.txt` keeps its lines and adds `rows with stored_at NULL: N` and `queue drained after N s` (or `did not drain within N s`).
+- **Redaction:** the IoT endpoint and the addresses are replaced by `<iot-endpoint>`, `<app-ip>` and `<oracle-ip>` in the copies of `settings.json`,
+  `ping.txt` and `network_check.txt`; the originals stay on the Oracle box. `settings.json` also records `tls`, `topic_prefix` and `client_id_prefix`.
+- **Baseline ping** is a normal `ping` of the IoT endpoint (it answers ICMP from the Oracle box: about 1.4 ms).
+- **Restart test:** the same script with the worker stopped for 20 s at 100 msg/s; IoT Core and SQS hold the readings, so expect 0 missing.
+- **First use:** a 30 s check at 500 msg/s against IoT Core, after the team lead agrees (stage, protocol, rate, duration), then the measured runs.
+- **Generator options** (also usable without the scripts): `--topic-prefix`, `--client-id-prefix`, `--cafile`, `--certfile`, `--keyfile`; or the
+  environment variables `TOPIC_PREFIX`, `CLIENT_ID_PREFIX`, `CAFILE`, `CERTFILE`, `KEYFILE` for `run_mqtt.sh`. All are off by default.
+
 # Load generator (HTTP)
 
 Runs on the Oracle ARM machine in Mumbai, never on a machine being migrated. On the Oracle box use
