@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini HealthSuite</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Oswald:wght@500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+/* Broadcast print look (from the Stitch design): newsprint paper, carbon ink, hard edges and offset shadows.
+   Colour carries meaning only: blue = HTTP, orange = MQTT, red = abnormal reading, green = healthy. */
+:root {
+  color-scheme: light;
+  --paper: #f4f1ea; --panel: #ebe7de; --sheet: #ffffff; --ink: #121212; --ink-2: #444748; --muted: #747878;
+  --hair: #c8c4bc; --track: #f0ede6; --dot: rgba(18,18,18,0.07); --strip: #121212; --strip-ink: #f4f1ea; --strip-dim: #b9b5ab;
+  --http: #2a78d6; --mqtt: #eb6834; --quiet: #dcdad3; --ok: #16a34a; --bad: #d03b3b; --bad-wash: #ffe8e8;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #0f0f0e; --panel: #1a1a19; --sheet: #121211; --ink: #f0ece2; --ink-2: #c3bfb3; --muted: #8d897f;
+    --hair: #33322e; --track: #24231f; --dot: rgba(240,236,226,0.05); --strip: #000; --strip-ink: #f0ece2; --strip-dim: #8d897f;
+    --http: #3987e5; --mqtt: #d95926; --quiet: #45433e; --ok: #22c55e; --bad-wash: rgba(208,59,59,0.22);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #0f0f0e; --panel: #1a1a19; --sheet: #121211; --ink: #f0ece2; --ink-2: #c3bfb3; --muted: #8d897f;
+  --hair: #33322e; --track: #24231f; --dot: rgba(240,236,226,0.05); --strip: #000; --strip-ink: #f0ece2; --strip-dim: #8d897f;
+  --http: #3987e5; --mqtt: #d95926; --quiet: #45433e; --ok: #22c55e; --bad-wash: rgba(208,59,59,0.22);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background-color: var(--paper); background-image: radial-gradient(var(--dot) 0.75px, transparent 0.75px); background-size: 24px 24px;
+  color: var(--ink); font: 15px/1.55 "DM Sans", system-ui, sans-serif; }
+h1, h2, h3, .disp { font-family: Oswald, "Arial Narrow", sans-serif; text-transform: uppercase; margin: 0; }
+.mono, code, th, .chip, .tag { font-family: "Space Mono", ui-monospace, monospace; }
+.num { font-variant-numeric: tabular-nums; }
+code { font-size: 12px; background: var(--panel); border: 1px solid var(--hair); padding: 0 4px; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 0 16px; }
+
+/* header + ticker */
+header { position: sticky; top: 0; z-index: 10; background: var(--paper); border-bottom: 2px solid var(--ink); }
+.title { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; padding-top: 14px; }
+.kick { font: 700 11px "Space Mono", monospace; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; }
+h1 { font-size: clamp(34px, 6vw, 60px); line-height: 1; letter-spacing: -0.5px; }
+.ctrl { display: flex; gap: 10px; align-items: center; padding-bottom: 4px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; border: 1px solid currentColor; padding: 3px 10px; font: 700 12px "Space Mono", monospace; text-transform: uppercase; color: var(--muted); }
+.pill i { width: 9px; height: 9px; background: currentColor; display: inline-block; }
+.pill.ok { color: var(--ok); } .pill.down { color: var(--bad); }
+button { font: 700 12px "Space Mono", monospace; text-transform: uppercase; letter-spacing: 1px; color: var(--ink); background: transparent;
+  border: 1.5px solid var(--ink); padding: 4px 12px; cursor: pointer; }
+button:hover { background: var(--ink); color: var(--paper); }
+button.solid { background: var(--ink); color: var(--paper); font-family: Oswald, sans-serif; font-size: 15px; padding: 7px 16px; }
+button.solid:hover { background: var(--mqtt); border-color: var(--mqtt); }
+nav { display: flex; gap: 28px; overflow-x: auto; margin-top: 10px; border-top: 1px solid var(--hair); padding-top: 8px; }
+nav a { font: 600 15px Oswald, sans-serif; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); text-decoration: none; padding-bottom: 6px;
+  border-bottom: 4px solid transparent; white-space: nowrap; }
+nav a:hover, nav a.on { color: var(--ink); border-bottom-color: var(--ink); }
+nav a span { font: 700 11px "Space Mono", monospace; margin-right: 4px; color: var(--muted); }
+.ticker { background: var(--strip); color: var(--strip-dim); font: 12px "Space Mono", monospace; letter-spacing: 0.5px; }
+.ticker .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 18px; padding-top: 6px; padding-bottom: 6px; }
+.ticker b { color: var(--strip-ink); }
+.ticker .live { background: var(--mqtt); color: #fff; padding: 0 6px; font-weight: 700; margin-right: 8px; }
+.ticker .okv { color: var(--ok); font-weight: 700; }
+
+/* sections */
+main { padding: 34px 0 20px; }
+section { margin-bottom: 60px; scroll-margin-top: 150px; }
+.sec-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px; border-bottom: 4px solid var(--ink); padding-bottom: 8px; margin-bottom: 18px; }
+h2 { font-size: clamp(28px, 4.4vw, 48px); line-height: 1.05; }
+h2 span { color: var(--muted); font-size: 0.65em; margin-right: 10px; }
+.lead { color: var(--ink-2); margin: 4px 0 0; max-width: 80ch; }
+.tag { background: var(--ink); color: var(--paper); font-size: 12px; font-weight: 700; padding: 3px 10px; text-transform: uppercase; letter-spacing: 1px; }
+.box { background: var(--panel); border: 2px solid var(--ink); box-shadow: 4px 4px 0 0 var(--ink); padding: 18px; }
+.box-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; border-bottom: 2px solid var(--ink); padding-bottom: 8px; margin-bottom: 12px; }
+.box-head small { display: block; font: 700 11px "Space Mono", monospace; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+h3 { font-size: 21px; letter-spacing: 0.5px; }
+.inset { background: var(--sheet); border: 1px solid var(--ink); }
+.note { color: var(--muted); font-size: 12.5px; margin: 10px 0 0; }
+.g3 { display: grid; gap: 24px; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); }
+.g2 { display: grid; gap: 24px; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); margin-top: 24px; }
+
+/* stages */
+.stage { position: relative; display: flex; flex-direction: column; justify-content: space-between; }
+.stage::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 5px; background: var(--ink); }
+.status { font: 700 12px "Space Mono", monospace; background: var(--ink); color: var(--paper); padding: 2px 8px; white-space: nowrap; }
+.status.open { background: transparent; color: var(--ink); border: 2px solid var(--ink); padding: 0 6px; }
+.kv { display: grid; grid-template-columns: 92px 1fr; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--hair); font-size: 14px; }
+.kv > span:first-child { font: 700 11px "Space Mono", monospace; color: var(--muted); text-transform: uppercase; padding-top: 3px; }
+.kv > span:last-child { font-weight: 600; }
+.kv.changed { border-left: 4px solid var(--ink); padding-left: 10px; background: var(--track); }
+.kv.changed > span:first-child { color: var(--ink); }
+.chg { display: inline-block; font: 700 10px "Space Mono", monospace; background: var(--ink); color: var(--paper); padding: 0 6px; margin-bottom: 2px; }
+.chips span { display: inline-block; font: 700 11px "Space Mono", monospace; color: #fff; padding: 1px 7px; margin-right: 4px; }
+
+/* live */
+.board { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); background: var(--sheet); border: 2px solid var(--ink); box-shadow: 4px 4px 0 0 var(--ink); }
+.board > div { position: relative; padding: 18px 14px 14px; text-align: center; border-right: 2px solid var(--ink); }
+.board > div:last-child { border-right: 0; }
+.board > div::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 5px; background: var(--ink); }
+.board .bad::before { background: var(--bad); } .board .good::before { background: var(--ok); }
+.board label { display: block; font: 700 11px "Space Mono", monospace; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+.board .bad label, .board .bad .big { color: var(--bad); }
+.big { display: block; font: 700 clamp(40px, 5vw, 58px)/1.1 Oswald, sans-serif; font-variant-numeric: tabular-nums; }
+.big small { font-size: 0.42em; }
+.board .sub { font: 700 11px "Space Mono", monospace; text-transform: uppercase; color: var(--muted); }
+@media (max-width: 860px) { .board > div { border-right: 0; border-bottom: 2px solid var(--ink); } .board > div:last-child { border-bottom: 0; } }
+.split { display: grid; gap: 24px; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); margin-top: 24px; align-items: start; }
+@media (max-width: 960px) { .split { grid-template-columns: minmax(0, 1fr); } }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { background: var(--ink); color: var(--paper); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; text-align: left; padding: 8px 10px; white-space: nowrap; }
+td { padding: 7px 10px; border-bottom: 1px solid var(--hair); white-space: nowrap; }
+.r { text-align: right; } .c { text-align: center; }
+td.t { font: 12px "Space Mono", monospace; color: var(--muted); }
+tr.abn td { background: var(--bad-wash); color: var(--bad); font-weight: 700; }
+tr.abn td.dev { color: var(--ink); }
+.flag { font: 700 10px "Space Mono", monospace; text-transform: uppercase; padding: 1px 6px; border: 1px solid var(--hair); background: var(--panel); color: var(--ink-2); }
+.flag.abn { background: var(--bad); border-color: var(--bad); color: #fff; }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; background: var(--sheet); border: 1px solid var(--ink); padding: 6px 10px; margin-bottom: 10px;
+  font: 700 11px "Space Mono", monospace; text-transform: uppercase; }
+.legend i { display: inline-block; width: 13px; height: 13px; border: 1px solid var(--ink); margin-right: 6px; vertical-align: -2px; }
+.matrix { display: grid; grid-template-columns: repeat(10, 1fr); gap: 5px; padding: 10px; }
+.tile { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font: 700 9.5px "Space Mono", monospace;
+  background: var(--http); color: #fff; }
+.tile.quiet { background: var(--quiet); color: var(--ink-2); font-weight: 400; }
+.tile.abn { background: var(--bad); }
+.foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; font: 11px "Space Mono", monospace; color: var(--muted); text-transform: uppercase; margin-top: 8px; }
+
+/* results */
+.vs { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; background: var(--strip); padding: 14px 18px; border-bottom: 2px solid var(--ink); }
+.team { display: flex; align-items: center; gap: 10px; }
+.team.right { justify-content: flex-end; }
+.team b { font: 700 clamp(17px, 2.4vw, 22px) Oswald, sans-serif; letter-spacing: 1px; color: #fff; padding: 3px 12px; text-transform: uppercase; }
+.team span { font: 11px "Space Mono", monospace; color: var(--strip-dim); text-transform: uppercase; }
+.vs > .mid { font: 700 24px Oswald, sans-serif; color: var(--mqtt); letter-spacing: 3px; padding: 0 12px; }
+.h2h { background: var(--sheet); padding: 8px 22px 18px; }
+.row { padding: 16px 0; border-bottom: 1px solid var(--hair); }
+.row:last-child { border-bottom: 0; }
+.row .top { display: grid; grid-template-columns: 1fr minmax(150px, auto) 1fr; align-items: center; gap: 14px; }
+.row .v { font: 700 clamp(30px, 4.2vw, 48px)/1 Oswald, sans-serif; font-variant-numeric: tabular-nums; }
+.row .v small { font-size: 0.5em; font-weight: 500; }
+.row .v.h { text-align: right; color: var(--http); } .row .v.m { color: var(--mqtt); }
+.row .name { font: 700 11.5px "Space Mono", monospace; text-transform: uppercase; letter-spacing: 1px; text-align: center; border: 1px solid var(--ink);
+  background: var(--panel); padding: 4px 8px; white-space: nowrap; }
+.bar { display: grid; grid-template-columns: 1fr 1fr; height: 16px; margin-top: 10px; background: var(--track); border: 1px solid var(--ink); }
+.bar > div { display: flex; height: 100%; }
+.bar > div:first-child { justify-content: flex-end; border-right: 2px solid var(--ink); }
+.bar i { display: block; height: 100%; }
+.row .why { text-align: center; font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+@media (max-width: 640px) {
+  .h2h { padding: 4px 12px 12px; }
+  .row .top { grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+  .row .name { grid-column: 1 / -1; order: -1; justify-self: center; }
+  .row .v.h { text-align: left; }
+  .row .v.m { text-align: right; }
+  .team span { display: none; }
+  .rs { grid-template-columns: 56px 1fr 88px; }
+  .box { padding: 14px; }
+}
+.chartbox { position: relative; height: 270px; padding: 12px; }
+.key { display: flex; gap: 14px; font: 700 11px "Space Mono", monospace; }
+.key i { display: inline-block; width: 14px; height: 4px; margin-right: 5px; vertical-align: 3px; }
+.tl { padding: 14px; }
+.tl .lbl { display: flex; justify-content: space-between; font: 700 11.5px "Space Mono", monospace; text-transform: uppercase; margin: 10px 0 4px; }
+.track { height: 24px; background: var(--track); border: 1px solid var(--ink); position: relative; }
+.track i { position: absolute; top: 0; bottom: 0; }
+.axis { display: flex; justify-content: space-between; font: 11px "Space Mono", monospace; color: var(--muted); margin-top: 4px; }
+.rs { display: grid; grid-template-columns: 70px 1fr 110px; gap: 10px; align-items: center; margin: 8px 0; font: 700 11.5px "Space Mono", monospace; text-transform: uppercase; }
+.rs .track { height: 16px; }
+.sc { display: grid; grid-template-columns: 104px 1fr 220px; gap: 10px; align-items: center; margin: 12px 0; }
+.sc > b { white-space: nowrap; font: 700 18px Oswald, sans-serif; text-transform: uppercase; }
+.sc .track { height: 30px; }
+.sc .val { font: 700 26px/1 Oswald, sans-serif; font-variant-numeric: tabular-nums; }
+.sc .val small { font: 700 11px "Space Mono", monospace; color: var(--muted); display: block; margin-top: 3px; text-transform: uppercase; }
+.sc .send { position: absolute; top: -4px; bottom: -4px; width: 3px; background: var(--mqtt); }
+@media (max-width: 640px) {
+  .sc { grid-template-columns: 1fr auto; gap: 4px 10px; }
+  .sc .track { grid-column: 1 / -1; order: 3; }
+  #scale + .axis { margin-left: 0 !important; margin-right: 0 !important; }
+}
+details { margin-top: 24px; }
+summary { cursor: pointer; font: 700 19px Oswald, sans-serif; text-transform: uppercase; list-style: none; display: flex; justify-content: space-between; }
+summary::after { content: "+"; font-family: "Space Mono", monospace; }
+details[open] summary::after { content: "−"; }
+
+/* lessons */
+.lessons { display: grid; gap: 24px; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); }
+.lesson { display: flex; gap: 16px; align-items: flex-start; border-left-width: 8px; }
+.lesson .n { flex: none; width: 54px; height: 54px; display: flex; align-items: center; justify-content: center; background: var(--ink); color: var(--paper);
+  font: 700 28px Oswald, sans-serif; }
+.lesson p { margin: 6px 0 0; color: var(--ink-2); font-size: 14px; }
+footer { background: var(--strip); color: var(--strip-dim); font: 12px "Space Mono", monospace; text-transform: uppercase; letter-spacing: 1px; border-top: 3px solid var(--ink); }
+footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding-top: 14px; padding-bottom: 14px; }
+footer b { color: var(--mqtt); }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="title">
+      <div><div class="kick">IT457 Cloud Computing · Migration case study</div><h1>Mini HealthSuite</h1></div>
+      <div class="ctrl">
+        <span id="health" class="pill"><i></i><span>Checking</span></span>
+        <button id="theme" type="button">Lights</button>
+      </div>
+    </div>
+    <nav>
+      <a href="#built"><span>01</span>What we built</a><a href="#live"><span>02</span>Live</a>
+      <a href="#results"><span>03</span>Results</a><a href="#lessons"><span>04</span>Lessons</a>
+    </nav>
+  </div>
+</header>
+<div class="ticker"><div class="wrap">
+  <span><span class="live">Live</span><span class="okv" id="t-stored">–</span> readings stored</span>
+  <span>Served from <b id="host"></b> · devices on <b>Oracle Cloud, Mumbai</b> · updates every <b id="t-poll"></b></span>
+</div></div>
+
+<main class="wrap">
+<section id="built">
+  <div class="sec-head"><div>
+    <h2><span>01</span>What we built</h2>
+    <p class="lead">One app that stores vital signs from 100 simulated bedside devices, moved in three stages the way Philips moved
+      HealthSuite: first lift-and-shift onto a VM, then refactor onto managed services. A marked row changed from the stage before.</p>
+  </div></div>
+  <div class="g3">
+    <div class="box stage">
+      <div>
+        <div class="box-head"><h3>Stage A · Laptop</h3><span class="status">Done · 10 Nov</span></div>
+        <div class="kv"><span>Devices</span><span>Oracle Cloud, Mumbai (100)</span></div>
+        <div class="kv"><span>Input</span><span class="chips"><span style="background:var(--http)">HTTP API</span><span style="background:var(--mqtt)">MQTT</span>Mosquitto</span></div>
+        <div class="kv"><span>App</span><span><code>api</code> + <code>worker</code>, Docker Compose</span></div>
+        <div class="kv"><span>Database</span><span>PostgreSQL container</span></div>
+      </div>
+      <p class="note">39 runs, 10 to 500 msg/s, over a Tailscale tunnel.</p>
+    </div>
+    <div class="box stage">
+      <div>
+        <div class="box-head"><h3>Stage B · EC2</h3><span class="status">Done · 12 Nov</span></div>
+        <div class="kv"><span>Devices</span><span>Oracle Cloud, Mumbai (100)</span></div>
+        <div class="kv"><span>Input</span><span>HTTP API · MQTT (Mosquitto)</span></div>
+        <div class="kv changed"><span>App</span><span><span class="chg">Changed</span><br>Same Compose file on EC2 <code>t3.small</code></span></div>
+        <div class="kv"><span>Database</span><span>PostgreSQL container on the VM</span></div>
+      </div>
+      <p class="note">Lift-and-shift, no code change. 24 runs and a restart test, in ap-south-1 (Mumbai).</p>
+    </div>
+    <div class="box stage">
+      <div>
+        <div class="box-head"><h3>Stage C · Managed</h3><span class="status">Done · 14 Nov</span></div>
+        <div class="kv"><span>Devices</span><span>Oracle Cloud, Mumbai (100)</span></div>
+        <div class="kv changed"><span>Input</span><span><span class="chg">Changed</span><br>AWS IoT Core, MQTT over TLS</span></div>
+        <div class="kv changed"><span>Queue</span><span><span class="chg">Changed</span><br>IoT rule → SQS → <code>worker</code></span></div>
+        <div class="kv changed"><span>Database</span><span><span class="chg">Changed</span><br>Amazon RDS PostgreSQL, private</span></div>
+      </div>
+      <p class="note">One new input module, settings only. EC2 role instead of stored keys; RDS reachable only from the EC2. 21 runs through IoT Core (MQTT only) with 1, 2 and 4 workers, 0 lost.</p>
+    </div>
+  </div>
+</section>
+
+<section id="live">
+  <div class="sec-head">
+    <div>
+      <h2><span>02</span>Live from the running stack</h2>
+      <p class="lead">Read every few seconds from this server's <code>/stats</code> and <code>/readings/latest</code>. The server flags any reading
+        outside the normal limits as <b style="color:var(--bad)">abnormal</b>; the generator sends about 5% of those on purpose.</p>
+    </div>
+    <button id="pause" class="solid" type="button">Pause updates</button>
+  </div>
+  <div class="board">
+    <div><label>Readings stored</label><b id="k-total" class="big">–</b><span class="sub" id="k-rate">&nbsp;</span></div>
+    <div class="bad"><label>Abnormal vitals</label><b id="k-abn" class="big">–</b><span class="sub">flagged by the server</span></div>
+    <div class="good"><label>Devices sending</label><b id="k-dev" class="big">–</b><span class="sub" id="k-dev-sub">current run, last 10 s</span></div>
+    <div><label>Latest reading</label><b id="k-last" class="big">–</b><span class="sub">received, server clock, UTC</span></div>
+  </div>
+  <div class="split">
+    <div class="box">
+      <div class="box-head"><h3>Latest readings</h3><small id="feed-note">newest first</small></div>
+      <div class="scroll inset"><table>
+        <thead><tr><th>Time (UTC)</th><th>Device</th><th>Patient</th><th class="r">HR</th><th class="r">SpO₂</th><th class="r">Temp</th><th class="c">Flag</th></tr></thead>
+        <tbody id="feed"><tr><td colspan="7">waiting for data…</td></tr></tbody>
+      </table></div>
+      <div class="foot"><span>Normal limits (defaults): HR 50–120 · SpO₂ ≥ 92% · Temp 35.5–38.0 °C</span></div>
+    </div>
+    <div class="box">
+      <div class="box-head"><h3>Device matrix</h3><small id="dev-count">0 devices</small></div>
+      <div class="legend"><span><i style="background:var(--http)"></i>Sent in last 10 s</span><span style="color:var(--bad)"><i style="background:var(--bad)"></i>Last reading abnormal</span>
+        <span style="color:var(--muted)"><i style="background:var(--quiet)"></i>Quiet</span></div>
+      <div id="devices" class="matrix inset" role="img" aria-label="One tile per device, numbered"></div>
+      <div class="foot"><span id="dev-note">Tiles appear as devices send.</span></div>
+    </div>
+  </div>
+  <p class="note">Pause during measured runs so the page is not part of the load (or open with <code>?poll=0</code>).</p>
+</section>
+
+<section id="results">
+  <div class="sec-head">
+    <div>
+      <h2><span>03</span>Results</h2>
+      <p class="lead">Every run: 100 devices, 120 s, fixed send schedule, 3 repeats. Stages B and C run in Mumbai like the generator (ping 1 to 2 ms),
+        so round trips are not the Mumbai to US distance. Stage C was measured with MQTT only. Numbers from <code>results/</code> (<code>run_stats.csv</code>, <code>queue_stats.csv</code>).</p>
+    </div>
+    <span class="tag">Stage B · EC2 · 500 msg/s</span>
+  </div>
+  <div class="box" style="padding:0">
+    <div class="vs">
+      <div class="team"><b style="background:var(--http)">HTTP</b><span>request / response</span></div>
+      <div class="mid">VS</div>
+      <div class="team right"><span>broker + queue</span><b style="background:var(--mqtt)">MQTT</b></div>
+    </div>
+    <div class="h2h" id="h2h"></div>
+  </div>
+  <p class="note">MQTT ran with 100 connections, one per device. Its round trip ends at the broker's acknowledgement, before the save,
+    so compare server time, not round trips. CPU and store rate come from <code>vmstat</code> and <code>stored_at</code> (RESULTS.md, Stage B findings 2–3).</p>
+
+  <div class="g2">
+    <div class="box">
+      <div class="box-head"><div><small>Same code, three setups</small><h3>Server time to save a reading</h3></div>
+        <div class="key"><span style="color:var(--http)"><i style="background:var(--http)"></i>HTTP</span><span style="color:var(--mqtt)"><i style="background:var(--mqtt)"></i>MQTT</span></div></div>
+      <div class="inset chartbox"><canvas id="c-server" aria-label="Average server time by send rate, Stage A dashed, Stage B solid, Stage C dotted"></canvas></div>
+      <div class="foot"><span>Dashed = A (laptop) · solid = B (EC2) · dotted = C (RDS, MQTT only)</span><span>Average over 3 repeats</span></div>
+      <p class="note">Stage C is about 4.3–4.8 ms: each save is two round trips to a separate RDS machine. It does not include the wait in the queue.</p>
+    </div>
+    <div class="box">
+      <div class="box-head"><div><small>MQTT · 500 msg/s · 1 worker</small><h3>The queue hid the overload</h3></div><span class="tag">0 lost in B and C</span></div>
+      <div class="inset tl">
+        <div id="queue-tl"></div>
+        <div class="axis"><span>0 s</span><span>120</span><span>240</span><span>360</span><span>480</span><span>600 s</span></div>
+        <p class="note">One worker cannot keep up with 500 msg/s, so readings wait in the broker (B) or in SQS (C) and are all stored in the end.
+          Neither round trip nor server time shows that wait.</p>
+        <div class="lbl" style="margin-top:16px;border-top:1px solid var(--hair);padding-top:12px"><span>Restart test · worker stopped 20 s at 100 msg/s</span></div>
+        <div id="restart"></div>
+        <div class="axis" style="margin-left:80px;margin-right:120px"><span>0 s</span><span>20</span><span>40 s</span></div>
+        <p class="note">Grey: longest gap between stored readings. Black: catching up above 110% of the send rate. Mean of 3 repeats; 0 of 12,000 lost each time.
+          Stage C has almost no catch-up burst: one worker stores at most about 104/s.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="box" style="margin-top:24px">
+    <div class="box-head"><div><small>Stage C only · MQTT through IoT Core · 500 msg/s</small><h3>Scaling out: more workers on one queue</h3></div><span class="tag">0 lost in all 9 runs</span></div>
+    <div class="inset tl">
+      <div class="legend" style="border:0;padding:0;background:none"><span><i style="background:var(--ink)"></i>Stored per second</span>
+        <span style="color:var(--muted)"><i style="background:var(--quiet)"></i>Perfect scaling (1 worker × N)</span>
+        <span style="color:var(--mqtt)"><i style="background:var(--mqtt)"></i>Send rate 500/s</span></div>
+      <div id="scale"></div>
+      <div class="axis" style="margin-left:114px;margin-right:230px"><span>0</span><span>250</span><span>500/s</span></div>
+    </div>
+    <p class="note">Queue peak from SQS counters every 5 s; drained = seconds after sending stopped until the queue was empty. SQS hands each message to one worker, so adding workers with <code>--scale worker=N</code> shares the load. In Stages A and B every
+      worker would get every MQTT message (one fixed client ID), so they were measured with one worker only. CPU, CPU credits and RDS disk were not
+      the limit at 4 workers; the cause of the 3.6× is not measured (RESULTS.md, Stage C findings 3–4).</p>
+  </div>
+
+  <details class="box">
+    <summary>Full results table (all stages and rates)</summary>
+    <div class="scroll inset" style="margin-top:14px"><table>
+      <thead><tr><th>Stage</th><th>Kind</th><th class="r">Rate</th><th class="r">Runs</th><th class="r">Sent</th><th class="r">Stored</th>
+        <th class="r">Stored %</th><th class="r">Server avg ms</th><th class="r">Round trip median ms</th></tr></thead>
+      <tbody id="numbers"></tbody>
+    </table></div>
+  </details>
+</section>
+
+<section id="lessons">
+  <div class="sec-head"><div><h2><span>04</span>Lessons</h2><p class="lead">What the three stages taught us.</p></div></div>
+  <div class="lessons">
+    <div class="box lesson"><span class="n">01</span><div><h3>A queue protects data, not time</h3>
+      <p>MQTT lost nothing where HTTP lost about a third at 500 msg/s, but storing a 120 s burst took about 285 s on Stage B and about 560 s with one
+        worker on Stage C. No loss is not real time.</p></div></div>
+    <div class="box lesson"><span class="n">02</span><div><h3>The small VM ran out of CPU first</h3>
+      <p>The <code>t3.small</code> was about 85% busy during HTTP at 500 msg/s and dropped 56,487 readings. Memory, swap and CPU credits were fine.</p></div></div>
+    <div class="box lesson"><span class="n">03</span><div><h3>Managed services move the limits</h3>
+      <p>With RDS each save is two network round trips, so server time went from 2.3–3.0 ms to 4.3–4.8 ms and one worker stores only about 104/s.
+        SQS lets workers share the queue: 4 workers reached 372/s (3.6×). RDS <code>db.t4g.micro</code> allows 79 connections, so pools must fit.</p></div></div>
+    <div class="box lesson"><span class="n">04</span><div><h3>Moving the database is quick, but not free</h3>
+      <p>A cold cutover of 1,000,000 rows to RDS stopped storing for about 15 s with MQTT (0 lost) and about 25 s with HTTP (about 2,500 lost per run).
+        Dump and restore took only about 4 s and 8–10 s.</p></div></div>
+    <div class="box lesson"><span class="n">05</span><div><h3>Cheap to test, IoT Core is the bill</h3>
+      <p>Stage B's test window cost about $0.09. Stage C's 21 runs cost about $0.98 for 633,600 messages, $1.55 per million, and 88% of it was IoT Core
+        (Mumbai list prices, before credits).</p></div></div>
+  </div>
+</section>
+</main>
+
+<footer><div class="wrap"><span><b>Synthetic readings only</b> · no real patient data</span><span>IT457 Cloud Computing · Mini HealthSuite</span></div></footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const fmt = (n) => Number(n).toLocaleString("en-US");
+const utcTime = (iso) => (iso ? new Date(iso).toISOString().slice(11, 19) : "–");
+$("host").textContent = location.host;
+
+$("theme").addEventListener("click", () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark";
+  drawCharts();
+});
+
+// ---- live ----------------------------------------------------------------
+const params = new URLSearchParams(location.search);
+const pollS = params.has("poll") ? Number(params.get("poll")) : 2;
+const STALE_MS = 10000;
+const devices = new Map(); // device_id -> {at: ms on the server clock, abnormal}
+let timer = null, last = null;
+$("t-poll").textContent = pollS > 0 ? pollS + " s" : "paused";
+
+function cell(text, cls) {
+  const td = document.createElement("td");
+  td.textContent = text;
+  if (cls) td.className = cls;
+  return td;
+}
+
+function setHealth(ok, text) {
+  $("health").className = "pill " + (ok ? "ok" : "down");
+  $("health").lastElementChild.textContent = text;
+}
+
+async function poll() {
+  let health;
+  try {
+    health = await fetch("/health", { cache: "no-store" });
+  } catch (e) {
+    setHealth(false, "API unreachable");
+    return;
+  }
+  setHealth(health.ok, health.ok ? "Database OK" : "Database down");
+  if (!health.ok) return; // /stats and /readings need the database
+  try {
+    const [stats, rows] = await Promise.all([
+      fetch("/stats").then((r) => r.json()), fetch("/readings/latest?limit=300").then((r) => r.json()),
+    ]);
+    renderStats(stats);
+    renderFeed(rows.slice(0, 10));
+    renderDevices(rows, stats.latest_received_at);
+  } catch (e) {
+    // keep the last numbers; the next poll tries again
+  }
+}
+
+function renderStats(s) {
+  $("k-total").textContent = fmt(s.total);
+  $("t-stored").textContent = fmt(s.total);
+  const pct = s.total ? ((100 * s.abnormal) / s.total).toFixed(1) : null;
+  $("k-abn").innerHTML = fmt(s.abnormal) + (pct ? ` <small>(${pct}%)</small>` : "");
+  $("k-dev-sub").textContent = `current run, last 10 s · ${fmt(s.devices)} IDs stored`;
+  $("k-last").textContent = utcTime(s.latest_received_at);
+  // Rate from two server counts over the browser's own interval (one clock); approximate.
+  const now = performance.now();
+  if (last && now > last.t) {
+    const rate = ((s.total - last.total) * 1000) / (now - last.t);
+    $("k-rate").textContent = "about " + Math.max(0, rate).toFixed(0) + " per second now";
+  }
+  last = { t: now, total: s.total };
+}
+
+function renderFeed(rows) {
+  const body = $("feed");
+  body.replaceChildren();
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const td = cell("no readings yet");
+    td.colSpan = 7;
+    tr.append(td);
+    body.append(tr);
+    return;
+  }
+  for (const r of rows) {
+    const tr = document.createElement("tr");
+    if (r.abnormal) tr.className = "abn";
+    const flag = document.createElement("span");
+    flag.className = "flag" + (r.abnormal ? " abn" : "");
+    flag.textContent = r.abnormal ? "Abnormal" : "Normal";
+    const flagCell = cell("", "c");
+    flagCell.append(flag);
+    tr.append(cell(utcTime(r.received_at), "t"), cell(r.device_id, "dev"), cell(r.patient_ref, "t"),
+      cell(r.heart_rate + " bpm", "r"), cell(r.spo2 + "%", "r"), cell(Number(r.temperature).toFixed(1) + " °C", "r"), flagCell);
+    body.append(tr);
+  }
+}
+
+function renderDevices(rows, latestIso) {
+  for (const r of rows.slice().reverse()) {
+    const at = Date.parse(r.received_at);
+    const prev = devices.get(r.device_id);
+    if (!prev || at >= prev.at) devices.set(r.device_id, { at, abnormal: r.abnormal });
+  }
+  // Staleness compares server timestamps only: each device's last reading against the newest one.
+  const newest = latestIso ? Date.parse(latestIso) : 0;
+  // Show only the current run: device IDs carry the run tag ("<tag>-dev-0007"); take it from the newest reading.
+  const tag = rows.length && rows[0].device_id.includes("-dev-") ? rows[0].device_id.split("-dev-")[0] + "-dev-" : "";
+  const box = $("devices");
+  box.replaceChildren();
+  let quiet = 0, abn = 0;
+  for (const [id, d] of [...devices.entries()].filter(([id]) => id.startsWith(tag)).sort()) {
+    const tile = document.createElement("div");
+    const stale = newest - d.at > STALE_MS;
+    quiet += stale;
+    abn += !stale && d.abnormal;
+    tile.className = "tile" + (stale ? " quiet" : d.abnormal ? " abn" : "");
+    const n = id.match(/(\d+)$/);
+    tile.textContent = n ? String(Number(n[1])).padStart(2, "0") : "";
+    tile.title = `${id}: last reading ${utcTime(new Date(d.at).toISOString())} UTC${d.abnormal ? ", abnormal" : ""}`;
+    box.append(tile);
+  }
+  const shown = box.children.length;
+  $("k-dev").textContent = fmt(shown - quiet);
+  $("dev-count").textContent = (tag ? tag.slice(0, -5) + " · " : "") + shown + " devices";
+  $("dev-note").textContent = shown
+    ? `${shown - quiet} sending · ${abn} abnormal · ${quiet} quiet` : "Tiles appear as devices send.";
+}
+
+function start() { if (pollS > 0 && !timer) { poll(); timer = setInterval(poll, pollS * 1000); $("pause").textContent = "Pause updates"; } }
+function stop() { clearInterval(timer); timer = null; $("pause").textContent = "Resume updates"; }
+$("pause").addEventListener("click", () => (timer ? stop() : start()));
+if (pollS > 0) start(); else { poll(); $("pause").textContent = "Resume updates"; }
+
+// ---- results -------------------------------------------------------------
+let results = null;
+const charts = [];
+const RATES = [10, 50, 100, 500];
+const SERIES = [
+  { kind: "http", label: "HTTP", color: "--http" },
+  { kind: "mqtt-100conn", label: "MQTT", color: "--mqtt" },
+];
+const row = (stage, kind, rate) => results.matrix.find((m) => m.stage === stage && m.kind === kind && m.rate === rate);
+
+function renderH2H() {
+  const h = row("B", "http", 500), m = row("B", "mqtt-100conn", 500);
+  if (!h || !m) return;
+  const sent = fmt(h.sent);
+  // [name, HTTP value, MQTT value, HTTP shown, MQTT shown, footnote]. Each bar is scaled to the larger of the two.
+  const stats = [
+    ["Readings stored", h.stored_pct, m.stored_pct, `${h.stored_pct}<small>%</small>`, `${m.stored_pct}<small>%</small>`, `of ${sent} sent over 3 repeats each`],
+    ["Readings missing", h.missing, m.missing, fmt(h.missing), fmt(m.missing), "HTTP clients gave up after 2 s; MQTT's broker queued the surplus"],
+    ["Server time, avg", h.server_avg_ms, m.server_avg_ms, `${h.server_avg_ms}<small> ms</small>`, `${m.server_avg_ms}<small> ms</small>`, "received to saved, on the VM's clock; lower is better"],
+    ["Store rate reached", 330, 210, "~330<small>/s</small>", "~210<small>/s</small>", "MQTT's single worker was slower: one thread waiting on the disk"],
+    ["VM CPU busy", 85, 29, "~85<small>%</small>", "~29<small>%</small>", "vmstat every 5 s; HTTP ran the 2-vCPU VM out of CPU"],
+  ];
+  const box = $("h2h");
+  box.replaceChildren();
+  for (const [name, a, b, sa, sb, why] of stats) {
+    const max = Math.max(a, b) || 1;
+    box.insertAdjacentHTML("beforeend", `<div class="row">
+      <div class="top"><span class="v h">${sa}</span><span class="name">◀ ${name} ▶</span><span class="v m">${sb}</span></div>
+      <div class="bar"><div><i style="width:${(100 * a) / max}%;background:var(--http)"></i></div>
+        <div><i style="width:${(100 * b) / max}%;background:var(--mqtt)"></i></div></div>
+      <div class="why">${why}</div></div>`);
+  }
+}
+
+function drawCharts() {
+  if (!results || !window.Chart) return;
+  charts.splice(0).forEach((c) => c.destroy());
+  Chart.defaults.font.family = '"Space Mono", ui-monospace, monospace';
+  Chart.defaults.font.size = 11;
+  const muted = css("--muted"), sheet = css("--sheet");
+  const lines = [];
+  // Line style shows the stage: A dashed, B solid, C dotted (Stage C has MQTT only).
+  const DASH = { A: [5, 4], B: [], C: [2, 3] };
+  for (const stage of ["B", "C", "A"]) {
+    for (const s of SERIES) {
+      const data = RATES.map((r) => row(stage, s.kind, r)?.server_avg_ms ?? null);
+      if (data.every((v) => v === null)) continue;
+      lines.push({ label: `${s.label}, Stage ${stage}`, data,
+        borderColor: css(s.color), backgroundColor: css(s.color), borderWidth: stage === "A" ? 2 : 3, pointRadius: stage === "A" ? 3 : 4,
+        pointStyle: stage === "C" ? "rect" : "circle", pointHoverRadius: 6, pointBorderColor: sheet, pointBorderWidth: 2, borderDash: DASH[stage] });
+    }
+  }
+  charts.push(new Chart($("c-server"), {
+    type: "line", data: { labels: RATES.map((r) => r + " msg/s"), datasets: lines },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.raw} ms` } } },
+      scales: {
+        x: { ticks: { color: muted }, grid: { display: false }, border: { color: css("--ink"), width: 1.5 } },
+        y: { beginAtZero: true, ticks: { color: muted, callback: (v) => v + " ms" }, grid: { color: css("--hair") }, border: { display: false } },
+      },
+    },
+  }));
+}
+
+function renderRestart() {
+  const box = $("restart");
+  box.replaceChildren();
+  const span = 40;
+  for (const stage of ["A", "B", "C"]) {
+    const rs = results.restart.filter((r) => r.stage === stage);
+    if (!rs.length) continue;
+    const gap = rs.reduce((a, r) => a + r.gap_s, 0) / rs.length;
+    const up = rs.reduce((a, r) => a + r.seconds_above_110pct, 0) / rs.length;
+    const peaks = rs.map((r) => r.peak_stored_per_s).filter((p) => p !== null);
+    const after = peaks.length ? `then peak ${Math.max(...peaks)} stored per second` : "no catch-up burst";
+    box.insertAdjacentHTML("beforeend",
+      `<div class="rs"><span>Stage ${stage}</span><div class="track" title="${gap.toFixed(1)} s gap, ${after}">
+        <i style="left:0;width:${(100 * gap) / span}%;background:var(--quiet)"></i>
+        <i style="left:${(100 * gap) / span}%;width:${(100 * up) / span}%;background:var(--ink)"></i></div>
+        <span>${gap.toFixed(1)} s + ${up.toFixed(0)} s</span></div>`);
+  }
+}
+
+const queueRow = (kind, rate) => (results.queue || []).find((q) => q.stage === "C" && q.kind === kind && q.rate === rate);
+
+function renderQueueTimeline() {
+  const span = 600;
+  const c1 = queueRow("mqtt-100conn", 500);
+  // [label, colour, end second, right-hand text]. Stage B's ~285 s is from stored_at on the VM (RESULTS.md, Stage B finding 3);
+  // Stage C's end is 120 s of sending plus the measured time for SQS to empty.
+  const tracks = [
+    ["Generator sends", "--mqtt", 120, "0–120 s"],
+    ["Stage B · broker, worker stores", "--ink", 285, "to about 285 s"],
+  ];
+  if (c1) tracks.push(["Stage C · SQS, worker stores", "--ink", 120 + c1.drain_s,
+    `to about ${Math.round(120 + c1.drain_s)} s · queue peak ${fmt(Math.round(c1.queue_peak))}`]);
+  $("queue-tl").innerHTML = tracks.map(([label, color, end, text]) =>
+    `<div class="lbl"><span${color === "--mqtt" ? ' style="color:var(--mqtt)"' : ""}>${label}</span><span>${text}</span></div>
+     <div class="track"><i style="left:0;width:${Math.min(100, (100 * end) / span)}%;background:var(${color})"></i></div>`).join("");
+}
+
+function renderScaling() {
+  const one = queueRow("mqtt-100conn", 500);
+  const box = $("scale");
+  if (!one) return;
+  const max = 500; // axis: 0 to the 500/s send rate, drawn as the orange line at the right edge
+  const kinds = { 1: "mqtt-100conn", 2: "mqtt-100conn-w2", 4: "mqtt-100conn-w4" };
+  box.innerHTML = Object.entries(kinds).map(([n, kind]) => {
+    const q = queueRow(kind, 500);
+    if (!q) return "";
+    const ideal = Math.min(one.stored_per_s * n, max);
+    return `<div class="sc"><b>${n} worker${n > 1 ? "s" : ""}</b>
+      <div class="track" title="${q.stored_per_s} stored per second, ${(q.stored_per_s / one.stored_per_s).toFixed(1)}x one worker">
+        <i style="left:0;width:${(100 * ideal) / max}%;background:var(--quiet)"></i>
+        <i style="left:0;width:${(100 * q.stored_per_s) / max}%;background:var(--ink)"></i>
+        <span class="send" style="right:-2px"></span></div>
+      <span class="val">${Math.round(q.stored_per_s)}<small style="display:inline">/s · ${(q.stored_per_s / one.stored_per_s).toFixed(1)}×</small>
+        <small>peak ${fmt(Math.round(q.queue_peak))} · drained ${Math.round(q.drain_s)} s</small></span></div>`;
+  }).join("");
+}
+
+function renderNumbers() {
+  const body = $("numbers");
+  for (const m of results.matrix.filter((m) => !m.kind.endsWith("-restart"))) {
+    const tr = document.createElement("tr");
+    tr.append(cell(m.stage), cell(m.kind), cell(m.rate, "r"), cell(m.runs, "r"), cell(fmt(m.sent), "r"), cell(fmt(m.stored), "r"),
+      cell(m.stored_pct, "r"), cell(m.server_avg_ms, "r"), cell(m.rtt_median_ms, "r"));
+    body.append(tr);
+  }
+}
+
+fetch("results.json").then((r) => r.json()).then((data) => {
+  results = data;
+  renderH2H();
+  renderRestart();
+  renderQueueTimeline();
+  renderScaling();
+  renderNumbers();
+  document.fonts.ready.then(drawCharts);
+  if (!window.Chart) document.querySelector("details").open = true; // chart library blocked: show the table instead
+});
+
+// Underline the nav link of the section in view.
+const links = [...document.querySelectorAll("nav a")];
+const io = new IntersectionObserver((entries) => {
+  for (const e of entries) if (e.isIntersecting) links.forEach((a) => a.classList.toggle("on", a.getAttribute("href") === "#" + e.target.id));
+}, { rootMargin: "-40% 0px -55% 0px" });
+document.querySelectorAll("main section").forEach((s) => io.observe(s));
+</script>
+</body>
+</html>

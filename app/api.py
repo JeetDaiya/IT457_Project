@@ -1,7 +1,10 @@
 """Interface layer (HTTP): thin FastAPI routes. No business logic lives here."""
 
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.rules import Reading
 from app.service import ProcessReading, ReadingQueries, UnknownPatient
@@ -74,5 +77,11 @@ def create_app(process: ProcessReading, queries: ReadingQueries) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def form_page() -> str:
         return _FORM_PAGE
+
+    # Static page that reads the endpoints above; results.json comes from loadtest/dashboard_data.py.
+    dashboard = Path(__file__).parent / "static" / "dashboard"
+    app.mount(
+        "/dashboard", StaticFiles(directory=dashboard, html=True), name="dashboard"
+    )
 
     return app

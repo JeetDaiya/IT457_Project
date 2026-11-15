@@ -282,6 +282,22 @@ def test_root_page_contains_a_form(make_client):
     assert "<form" in make_client().get("/").text.lower()
 
 
+# ---- GET /dashboard/ (static page and its results data) --------------------
+
+
+def test_dashboard_page_is_served(make_client):
+    response = make_client().get("/dashboard/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "/readings/latest" in response.text
+
+
+def test_dashboard_results_data_is_served(make_client):
+    response = make_client().get("/dashboard/results.json")
+    assert response.status_code == 200
+    assert response.json()["matrix"]
+
+
 # ---- main(argv) ------------------------------------------------------------
 
 
