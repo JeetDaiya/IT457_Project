@@ -109,7 +109,7 @@ python loadtest/result_tables.py results docs/RESULTS.md   # those two files -> 
 ```
 
 `run_stats.csv` has one line per run, including sent, stored and missing; lines of runs whose folder is no longer on
-this machine are kept. Then zip the new run folders into the team Drive archive and record the checksum.
+this machine are kept. Then zip the new run folders into the team Drive archive.
 
 # Stage B: the stack runs on a remote VM (`measure_run_remote.sh`)
 
