@@ -8,3 +8,4 @@ _Planned-but-not-built features. Do not build unless explicitly asked._
 - [ ] Parameter Store for DB password.
 - [ ] CloudTrail logging.
 - [ ] Name-free S3 archive.
+- [ ] Online B to C migration variant (dump while running, then copy the rows written since): would cut the downtime to seconds; the measured cold cutover is in `docs/RESULTS.md`.

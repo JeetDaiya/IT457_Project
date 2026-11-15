@@ -1,0 +1,19 @@
+{
+  "host": "13.206.238.45",
+  "port": 1883,
+  "rate": 100,
+  "duration": 600,
+  "tag": "migm100r3",
+  "devices": 100,
+  "seed": 1,
+  "connections": 100,
+  "inflight": 200,
+  "timeout_s": 2.0,
+  "tls": false,
+  "topic_prefix": "vitals",
+  "client_id_prefix": null,
+  "start_utc": "2026-11-15T12:00:03.943Z",
+  "paho": "1.6.1",
+  "python": "3.12.16",
+  "machine": "aarch64"
+}
