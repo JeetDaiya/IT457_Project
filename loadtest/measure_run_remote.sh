@@ -11,6 +11,8 @@
 #      connections, default 1), STAGE_NAME / RUN_NOTE (folder name only, see run_name.sh), APP_DIR (repo on the app host,
 #      default IT457_Project, relative to its home), REMOTE_ROOT (default results), LOCAL_ROOT (default <repo>/results),
 #      COLLECT_ONLY=<run folder name> to skip the checks and the run and only collect that run.
+# B -> C migration test: MIGRATION=1 (set by migration_run_remote.sh) keeps the Stage B stack and checks, but reads the database numbers
+#   from RDS (database MIG_TARGET_DB, default minihs_migrated), where all rows end up. STAGE=mig, STAGE_NAME=BtoC.
 # Server time (stored_at - received_at) uses the app host's clock only. The client round trip and the ping use the generator's clock.
 #
 # Stage C (IoT Core -> SQS -> worker -> RDS): the same script with STAGE_C=1, MQTT only. Needs IOT_ENDPOINT (device data endpoint),
@@ -55,6 +57,8 @@ compose="cd $app_dir && sudo docker compose --env-file .env -f $compose_file"
 # SQL goes in on stdin: echo "SELECT 1;" | db
 if [ "$c_mode" = 1 ]; then   # RDS is private: psql runs in a throwaway container on the app host (password and CA bundle stay there)
     db() { ssh -i "$APP_KEY" $ssh_opts "$APP" "cd $app_dir && set -a && . ./.env && set +a && sudo docker run --rm -i -e PGPASSWORD=\"\$RDS_PASSWORD\" -v \"\$RDS_CA_BUNDLE:/ca.pem:ro\" postgres:16 psql \"host=\$RDS_HOST user=\$RDS_USER dbname=\$RDS_DB sslmode=verify-full sslrootcert=/ca.pem\" -At -F ,"; }
+elif [ "${MIGRATION:-}" = 1 ]; then   # B -> C migration test: the finished data is in RDS, database MIG_TARGET_DB (default minihs_migrated)
+    db() { ssh -i "$APP_KEY" $ssh_opts "$APP" "cd $app_dir && set -a && . ./.env && set +a && sudo docker run --rm -i -e PGPASSWORD=\"\$RDS_PASSWORD\" -v \"\$RDS_CA_BUNDLE:/ca.pem:ro\" postgres:16 psql \"host=\$RDS_HOST user=\$RDS_USER dbname=${MIG_TARGET_DB:-minihs_migrated} sslmode=verify-full sslrootcert=/ca.pem\" -At -F ,"; }
 else
     db() { ssh -i "$APP_KEY" $ssh_opts "$APP" "$compose exec -T postgres sh -c 'psql -U \$POSTGRES_USER -d \$POSTGRES_DB -At -F ,'"; }
 fi
@@ -193,8 +197,9 @@ if [ "$c_mode" = 1 ]; then   # the IoT endpoint is account-specific: keep it out
 fi
 
 # ---- 4. wait until storing has finished (MQTT: the worker can lag behind the broker) ---------------
-prev=-1; same=0
-for _ in $(seq 1 60); do
+prev=-1; same=0; max_wait=60
+[ "${MIGRATION:-}" = 1 ] && max_wait=300   # the MQTT backlog after the cutover can take minutes to store
+for _ in $(seq 1 "$max_wait"); do
     n=$(echo "SELECT count(*) FROM readings WHERE device_id LIKE '${tag}-%';" | db | tr -d '[:space:]')
     if [ "$n" = "$prev" ]; then same=$((same + 1)); else same=0; fi
     [ "$same" -ge 2 ] && break
