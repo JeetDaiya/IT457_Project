@@ -3,9 +3,9 @@
 ## Folder layout
 
 ```
-app/          – FastAPI service (settings, db, rules, api, mqtt_in, sqs_in, main)
+app/          – FastAPI service (settings, db, rules, api, mqtt_in, sqs_in, main); static/dashboard/ (presentation page)
 infra/        – Dockerfile, docker-compose.yml, mosquitto/ config; AWS scripts/notes later
-loadtest/     – Locust and paho-mqtt generator scripts
+loadtest/     – Locust and paho-mqtt generator scripts; result_tables.py and dashboard_data.py (results → docs and page)
 tests/        – unit/API tests (mocked) and tests/integration (running stack)
 results/      – Raw run data, one folder per run, summary.csv
 docs/         – Living docs (this file, GOTCHAS, CHANGELOG, etc.)
@@ -27,7 +27,7 @@ Dependencies point inward only: `api` / `mqtt_in` / `sqs_in` → `service` → `
 | Configuration | `app/settings.py` | `Settings` and `load_settings()` (environment → settings); `Settings.limits()` returns `Limits` |
 | Application | `app/service.py` | `process_reading()` plus the ports it needs: `ReadingStore`, `Clock` |
 | Infrastructure | `app/db.py` | `PostgresReadingStore` (SQLAlchemy Core + psycopg2), schema init, patient seeding, `SystemClock`; `build_engine` sets libpq connect and TCP timeouts so a dropped connection fails in about a minute |
-| Interface | `app/api.py` | Thin FastAPI routers: call the injected processor, map outcome → HTTP status |
+| Interface | `app/api.py` | Thin FastAPI routers: call the injected processor, map outcome → HTTP status. Also serves `app/static/dashboard/` at `/dashboard/`: a static page that polls `/stats`, `/readings/latest` and `/health` (server timestamps only, never compared with the browser clock) and charts `results.json`, which `loadtest/dashboard_data.py` builds from `results/run_stats.csv`, `restart_stats.csv` and `queue_stats.csv`; re-run it after `result_tables.py` |
 | Interface | `app/mqtt_in.py` | `run()` subscribes to the topic at QoS 1 (persistent session) and reconnects; `handle_message()` parses, calls the injected processor and never raises. paho sends the ack after it returns |
 | Interface | `app/sqs_in.py` | Stage C. `run()` long-polls the queue (single thread); `poll_once()` receives up to 10 messages and deletes the finished ones in one call; `handle_body()` parses and calls the injected processor and returns whether the message may be deleted. Invalid readings and unknown patients are deleted, any other error leaves the message for SQS to redeliver |
 | Composition | `app/main.py` | Wires settings → store → processor; runs `api` or `worker` mode |
