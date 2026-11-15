@@ -23,11 +23,11 @@ tables. Per-run numbers: `results/run_stats.csv` and `restart_stats.csv`; the ra
 
 | | Stage A | Stage B | Stage C |
 |---|---|---|---|
-| App runs on | Laptop, Docker Compose | One EC2 VM (`t3.small`) in **Mumbai (`ap-south-1`)**, same Compose file | EC2 plus RDS, IoT Core and SQS |
+| App runs on | Laptop, Docker Compose | One EC2 VM (`t3.small`) in **Mumbai (`ap-south-1`)**, same Compose file | EC2 (`t3.small`, Mumbai) plus RDS (`db.t4g.micro`), IoT Core and SQS |
 | Load generator | Oracle Cloud ARM box, Mumbai (outside AWS) | same | same |
-| Network path | Tailscale tunnel over home Wi-Fi, direct path, ping about 12-14 ms | Internet, same city, ping about 2 ms | Internet, expected about 200-250 ms if the VM is in `us-east-1` |
-| Encryption | Plain HTTP and plain MQTT (port 1883) inside the Tailscale tunnel | Plain HTTP and plain MQTT | MQTT over TLS (IoT Core requires it) |
-| Status | **Done** (2026-11-10) | **Done** (2026-11-12, Mumbai; a `us-east-1` repeat is a team decision) | Not run yet |
+| Network path | Tailscale tunnel over home Wi-Fi, direct path, ping about 12-14 ms | Internet, same city, ping about 2 ms | Internet, same city: ping to the IoT Core endpoint about 1.1-1.3 ms (VM and IoT Core are both in Mumbai) |
+| Encryption | Plain HTTP and plain MQTT (port 1883) inside the Tailscale tunnel | Plain HTTP and plain MQTT | MQTT over TLS (port 8883, IoT Core requires it); the app reads from the queue inside AWS |
+| Status | **Done** (2026-11-10) | **Done** (2026-11-12, Mumbai; a `us-east-1` repeat is a team decision) | **Done** (2026-11-14, MQTT only, 21 measured runs; the B-to-C migration test and the cost are still to do) |
 
 ## Stage A (laptop)
 
@@ -110,7 +110,7 @@ many connections. Both sets are kept.
 
 - They come from one laptop on home Wi-Fi with a 12-14 ms ping. AWS will be about 200-250 ms away, so compare server time
   and the shape of the curves with Stages B and C, not the absolute round trips.
-- Stage A is unencrypted; Stage C will include TLS.
+- Stage A is unencrypted; Stage C includes TLS.
 - The MQTT round trip and server time leave out the time a message waits in the broker.
 - Three repeats per setting; the ranges show the spread. The MQTT 100-connection runs happened later in the evening than
   the HTTP runs, with Wi-Fi power save still on (fixed before the restart test).
@@ -221,24 +221,138 @@ address is charged while it exists.
 
 ## Stage C (EC2 + RDS + IoT Core + SQS)
 
-Not run yet. To add: the same tables with `stage=C`, the B-to-C migration test (data size, copy time, downtime = longest
-gap between `stored_at` values at 100 msg/s, row counts, no `seq` gaps, sample rows identical) and the cost per million messages.
+Run on 2026-11-14 (21 measured runs, all MQTT through IoT Core, 100 connections, 0.5 KB, 120 s each, 3 repeats): the usual matrix of
+10/50/100/500 msg/s with one worker (12 runs), the restart test (3 runs) and 500 msg/s with 2 and 4 workers (3 runs each). **Only MQTT was
+measured in Stage C; HTTP was measured in Stages A and B only.** Path: generator on the Oracle ARM box (Mumbai) -> IoT Core over TLS (port
+8883, QoS 1, one device certificate, client IDs `mini-hs-device-<n>`, topics `mini-hs/vitals/<device_id>`) -> IoT rule -> SQS standard queue
+`mini-hs-readings` -> worker on the EC2 `t3.small` (Mumbai) -> RDS `db.t4g.micro` (single-AZ, TLS `verify-full`). The generator waited for the
+queue to empty after every run before the next one started (the sampler writes `queue_depth.csv` every 5 s); the two `check` runs
+(30 s, 500 msg/s, 1 and 2 workers) from earlier the same day are not in the tables. Workers are added with `docker compose ... --scale worker=N`.
 
-### Cost so far (Stage C setup, estimate)
+### Matrix (MQTT through IoT Core, 100 connections, 1 worker)
 
-**About $0.03 of compute for the setup session on 2026-11-14** (11:54 to 12:38 IST; EC2 and RDS each ran about 0.5 h), at **Mumbai** list
-prices before 18% GST. Hours are the session's own estimate, not read from the bill, and the Stage C measured runs have not happened.
+<!-- result_tables: matrix stage=C kinds=mqtt-100conn -->
 
-| Item | Price | Usage | Cost |
+| Rate (msg/s) | Kind | Runs | Server time avg (ms) | Server time p95 (ms) | Round trip median (ms) | Round trip p95 (ms) | Fastest ping (ms) | Missing (sum) | Lost formula (sum) |
+|---|---|---|---|---|---|---|---|---|---|
+| 10 | mqtt-100conn | 3 | 4.77 (4.60-4.89) | 5.23 (5.05-5.37) | 14.7 (14.6-14.8) | 19.2 (19.1-19.3) | 1.1 | 0 | 0 |
+| 50 | mqtt-100conn | 3 | 4.48 (4.42-4.58) | 5.04 (4.91-5.12) | 14.7 (14.5-15.0) | 19.4 (19.0-19.9) | 1.1 | 0 | 0 |
+| 100 | mqtt-100conn | 3 | 4.29 (4.23-4.34) | 4.77 (4.69-4.83) | 14.7 (14.5-15.0) | 19.3 (19.1-19.7) | 1.2 | 0 | 0 |
+| 500 | mqtt-100conn | 3 | 4.33 (4.29-4.36) | 4.81 (4.74-4.86) | 14.6 (14.4-14.8) | 19.2 (19.0-19.6) | 1.2 | 0 | 0 |
+
+<!-- /result_tables -->
+
+### Queue and worker scaling (500 msg/s)
+
+<!-- result_tables: queue stage=C kinds=mqtt-100conn,mqtt-100conn-w2,mqtt-100conn-w4 -->
+
+| Workers | Rate (msg/s) | Kind | Runs | Server time avg (ms) | Round trip median (ms) | Round trip p95 (ms) | Queue peak (messages, 5 s samples) | Queue empty after sending stopped (s) | Stored per second | Missing (sum) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 10 | mqtt-100conn | 3 | 4.77 (4.60-4.89) | 14.7 (14.6-14.8) | 19.2 (19.1-19.3) | 0 (0-0) | 23 (15-35) | 10.0 (10.0-10.0) | 0 |
+| 1 | 50 | mqtt-100conn | 3 | 4.48 (4.42-4.58) | 14.7 (14.5-15.0) | 19.4 (19.0-19.9) | 19 (16-23) | 30 (25-40) | 49.9 (49.9-49.9) | 0 |
+| 1 | 100 | mqtt-100conn | 3 | 4.29 (4.23-4.34) | 14.7 (14.5-15.0) | 19.3 (19.1-19.7) | 406 (368-453) | 35 (30-45) | 96.8 (96.3-97.1) | 0 |
+| 1 | 500 | mqtt-100conn | 3 | 4.33 (4.29-4.36) | 14.6 (14.4-14.8) | 19.2 (19.0-19.6) | 47168 (46945-47330) | 442 (436-450) | 104.1 (103.5-105.1) | 0 |
+| 2 | 500 | mqtt-100conn-w2 | 3 | 4.32 (4.30-4.34) | 14.4 (14.4-14.5) | 18.9 (18.9-19.0) | 34542 (33993-34939) | 164 (160-166) | 207.6 (206.6-208.2) | 0 |
+| 4 | 500 | mqtt-100conn-w4 | 3 | 4.83 (4.77-4.86) | 14.5 (14.5-14.5) | 19.0 (18.9-19.0) | 15060 (14610-15401) | 47 (45-50) | 371.8 (369.0-375.9) | 0 |
+
+<!-- /result_tables -->
+
+### Restart test (MQTT, 100 msg/s, worker stopped for 20 s)
+
+<!-- result_tables: restart stage=C kind=mqtt-100conn-restart -->
+
+| Repeat | Longest gap between stored readings (s) | Sent | Stored | Missing | Lost formula | Seconds above 110% of the rate after restart | Peak stored per second |
+|---|---|---|---|---|---|---|---|
+| 1 | 23.87 | 12000 | 12000 | 0 | 0 | 0 |  |
+| 2 | 22.88 | 12000 | 12000 | 0 | 0 | 0 |  |
+| 3 | 22.25 | 12000 | 12000 | 0 | 0 | 1 | 111 |
+
+<!-- /result_tables -->
+
+### Findings (Stage C)
+
+1. **Nothing was lost in any of the 21 runs** (0 missing, 0 by the lost formula, every queue drained). Even at 500 msg/s with one worker,
+   which cannot keep up, the readings wait in SQS and are all stored in the end.
+2. **One worker stores about 104 readings per second, whatever the load.** At 10 and 50 msg/s it keeps up (10.0 and 49.9 stored per second),
+   at 100 msg/s it is at its limit (96.8; the queue peaks at about 400 and empties 35 s after sending stops), and at 500 msg/s it falls behind:
+   the queue grows to about 47,000 messages and needs about 442 s after the 120 s of sending to empty. The worker handles one reading at a time
+   and `process_reading` commits twice to RDS (insert, then the `stored_at` update), about 4.4 ms each, so it is the worker, not IoT Core or SQS.
+   This is the biggest difference from Stage B, where the same 500 msg/s over MQTT was stored without a queue and with 2.3 ms server time.
+3. **More workers scale it, but not in a straight line.** At 500 msg/s: 1 worker 104/s, 2 workers 208/s (2.0x), 4 workers 372/s (3.6x). The queue
+   peak falls from about 47,000 (1 worker) to 34,500 (2) and 15,000 (4), and the time to empty after sending from 442 s to 164 s and 47 s. Even
+   four workers (372/s) are below 500 msg/s, so the queue still builds up. The 4-worker server time rose slightly (4.83 ms against 4.3 ms)
+   and its p95 more (6.2 ms against about 4.9 ms). **The CloudWatch graphs show it was not CPU or CPU credits** (finding 4), so the
+   remaining suspects are the network round trip of each of the two commits and the workers' own SQS calls; none of these was measured. **The cause of the single worker limit is from reading the code and the stored-per-second numbers, not
+   from a profiler.**
+4. **Neither machine ran out of CPU, even with 4 workers** (values read off the CloudWatch console graphs, so approximate). The EC2 `t3.small`
+   peaked at about 26% CPU (5-minute average, 2 vCPUs) in the 4-worker runs, around 22:25 UTC. The RDS `db.t4g.micro` CPU followed the
+   stored rate: about 15% with 1 worker (104/s), about 24% with 2 workers (208/s) and about 40% with 4 workers (372/s) at the
+   1-minute peaks. The RDS CPU credit balance fell from about 14.5 to about 7.5 during the 4-worker runs and never reached 0, and the
+   surplus credit balance stayed at 0, so no throttling happened. RDS write latency (disk write) was a flat
+   0.9-1 ms during all the runs, 4-worker window included, so the disk did not slow down either; the worker sees about 4.4 ms per commit,
+   so most of that is not disk. Not looked at: RDS connections and the EC2 credit balance (EC2 CPU credit usage peaked at 2.6, not
+   a limit sign at this load).
+5. **Server time is 4.3-4.8 ms and does not depend on the rate.** It is about twice Stage B's MQTT figure (2.3-3.0 ms) because each reading
+   costs two round trips to a separate RDS machine instead of to a database on the same VM. **It does not include the wait in the queue**:
+   `received_at` is stamped when the worker first reads the message, so at 500 msg/s with one worker a reading can wait several minutes
+   in SQS and still show about 4 ms. The honest "reading arrives -> reading stored" delay is therefore the queue wait, which can be estimated
+   as the queue length divided by the stored rate (about 47,000 / 104 = about 450 s for the last reading of the 1-worker 500 msg/s run) but
+   is not measured directly. The generator's clock and the VM's clock are never subtracted.
+6. **The client round trip is 14-15 ms (p95 19 ms) at every rate and worker count**, against 2.2-2.4 ms in Stage B. It ends at IoT Core's
+   PUBACK, not at the database, and includes the TLS connection to IoT Core, so it says nothing about how long the reading takes to be stored.
+   The ping to the IoT endpoint was about 1.1-1.3 ms. All traffic stayed in Mumbai, so none of these numbers show an
+   intercontinental round trip.
+7. **Restart test: the longest gap between stored readings was 22.3-23.9 s** (worker down 20 s; Stage B 21.7-21.8 s), and nothing was lost:
+   while the worker is down the readings wait in the queue (about 2,500 at the peak) and the worker catches up afterwards at its normal
+   speed. The "peak stored per second" column is empty or about 111 because a single worker cannot store faster than about 104/s, so the
+   Stage B catch-up burst (260-270/s) does not exist here. The queue made the restart safe without needing the broker to redeliver.
+
+### What the Stage C numbers cannot say
+
+- MQTT only; no HTTP numbers for Stage C (neither direct to the API nor over HTTPS through IoT Core).
+- The VM and RDS are in Mumbai, like the generator, so these are not the `us-east-1` figures the cost model uses; the Mumbai versus
+  `us-east-1` repeat is still a team decision.
+- The worker count was tested at 1, 2 and 4 only, on a `t3.small` (2 vCPUs) and a burstable `db.t4g.micro`. CPU, CPU credits and
+  RDS disk write latency were not the limit at 4 workers (finding 4), but what is the limit (probably the network round trip of each
+  commit, or the SQS calls) is not measured, and 8 workers were not tried.
+- Queue peak and drain time come from SQS's approximate counters read every 5 s (they jumped between 0 and thousands in the first seconds of a
+  run), so use them as sizes of the effect, not exact values. "Queue empty" means three samples in a row showing 0 visible and 0 in flight.
+- Server time leaves out the time in the queue (finding 5); no end-to-end delay from the generator to the database was measured.
+- Three repeats per setting; the ranges show the spread. Wi-Fi power save on the laptop was still on during the batch; the laptop only
+  started the scripts over SSH, so it is not in any number here.
+
+### Cost (Stage C)
+
+**About $0.98 for the measured window, $1.55 per million messages** (usage x Mumbai list price, before 18% GST and before credits). The
+window is the batch of 21 runs, 2026-11-14 20:35:54 to 22:33:22 UTC (1.958 h, from `batch.log`), 633,600 messages through IoT Core.
+IoT Core is almost all of it (88%); the machines cost little only because they were counted for the window alone.
+
+| Item | List price (Mumbai) | Usage in the window | Cost |
 |---|---|---|---|
-| EC2 `t3.small` | $0.0224/h | about 0.5 h | $0.011 |
-| Public IPv4 address | $0.005/h | about 0.5 h | $0.003 |
-| RDS `db.t4g.micro` instance | $0.025/h (RDS console) | about 0.5 h | $0.013 |
-| **Compute for the session** | | | **about $0.03** |
+| IoT Core messaging | $1.05 per million messages (first billion) | 633,600 messages of 0.5 KB (one 5 KB step each) | $0.665 |
+| IoT Core rules triggered | $0.158 per million | 633,600 (one rule, `mini-hs/vitals/+`) | $0.100 |
+| IoT Core actions applied | $0.158 per million | 633,600 (one action, send to SQS) | $0.100 |
+| SQS | first million requests a month free | send, receive and delete requests, not counted exactly | $0.00 (the bill shows $0.00 for SQS, inside "Others") |
+| RDS `db.t4g.micro` | $0.025/h | 1.958 h | $0.049 |
+| RDS storage (gp3, 20 GiB) | $0.131 per GB-month | 1.958 h | $0.007 |
+| EC2 `t3.small` | $0.0224/h | 1.958 h | $0.044 |
+| EC2 disk (gp3, about 20 GB) | $0.0912 per GB-month | 1.958 h | $0.005 |
+| Public IPv4 address | $0.005/h | 1.958 h | $0.010 |
+| **Total for the window** | | | **$0.980, $1.55 per million messages** |
 
-Costs that run while the machines are stopped: the EC2's gp3 disk (about 20 GB, about $0.06 a day, same rate as Stage B) and RDS storage
-(gp3, 20 GiB; roughly $0.09 a day if the Mumbai rate is about $0.13 per GB-month, **a rate not yet confirmed**). Expected to be $0.00 or
-negligible: automated backups (free up to the database size), Database Insights Standard, the `aws/rds` encryption key, SQS (first million
-requests a month free), IoT Core test messages, and EC2-to-RDS traffic at these volumes. **Not yet counted:** the 2026-11-13 evening
-session (RDS creation, EC2 restart; times not recorded) and the measured runs. Replace this estimate with the Cost Explorer figures
-(RDS and EC2, daily, by usage type) once the runs are done.
+IoT Core connection minutes (about 11,750 for 100 connections over the window) are not priced here: the price was not looked up and the
+amount is immaterial. The 1-worker, 2-worker and 4-worker runs are all in the window, so this is the cost per message of the whole
+set, not of one setting.
+
+**Check against the bill (Cost Explorer, 2026-11-15, month to date, before credits):** AWS IoT **$0.91**. The calculation for all the IoT
+messages of the month is 663,600 (the 21 runs plus the two 30 s check runs) x ($1.05 + $0.158 + $0.158) per million = **$0.907**;
+the rest of the $0.91 is the few thousand messages of earlier tests and the connection minutes. So the IoT bill matches
+usage x list price, and the free tier (500,000 messages a month) was not applied to this account. The other lines of the same
+bill are month totals and cannot be matched to the window: EC2 compute $0.40, EC2 - Other $0.85 (disk, partly from Stage B), RDS $0.31, VPC $0.10
+(public IPv4), others $0.00, **$2.57 in all, covered by credits (net $0.00)**. The bill is a check on the calculation, not a separate finding.
+
+**What the window cost does not include.** The EC2 and RDS were left running from about 17:50 UTC on 2026-11-14 until the user stopped them on
+2026-11-15, far longer than the 1.96 h of the runs. The stack (EC2, RDS, disks, IPv4) costs about **$0.0585 per hour** whether or not
+messages flow, so each idle hour is about as much as the whole IoT cost of 40,000 messages. The cost per million above assumes the machines
+are on only for the runs. At a steady 100 msg/s (360,000 messages an hour) the always-on stack is about $0.16 per million messages, and IoT Core about $1.37
+per million, so about $1.53 per million in all, nearly the same as the $1.55 of the measured window.

@@ -1,0 +1,19 @@
+{
+  "host": "<iot-endpoint>",
+  "port": 8883,
+  "rate": 50,
+  "duration": 120,
+  "tag": "cm50r3",
+  "devices": 100,
+  "seed": 1,
+  "connections": 100,
+  "inflight": 100,
+  "timeout_s": 2.0,
+  "tls": true,
+  "topic_prefix": "mini-hs/vitals",
+  "client_id_prefix": "mini-hs-device",
+  "start_utc": "2026-11-14T21:23:44.867Z",
+  "paho": "1.6.1",
+  "python": "3.12.16",
+  "machine": "aarch64"
+}
