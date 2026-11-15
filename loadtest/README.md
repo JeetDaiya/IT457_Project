@@ -173,6 +173,14 @@ STAGE_C=1 IOT_ENDPOINT=<device-data-endpoint> IOT_CERT_DIR=/home/ubuntu/iot-cert
   `ping.txt` and `network_check.txt`; the originals stay on the Oracle box. `settings.json` also records `tls`, `topic_prefix` and `client_id_prefix`.
 - **Baseline ping** is a normal `ping` of the IoT endpoint (it answers ICMP from the Oracle box: about 1.4 ms).
 - **Restart test:** the same script with the worker stopped for 20 s at 100 msg/s; IoT Core and SQS hold the readings, so expect 0 missing.
+- **Worker count:** `WORKERS=<n>` in the app host's `.env` (default 1) sets how many worker containers read the queue (`deploy.replicas` in
+  `infra/docker-compose.stage-c.yml`); apply it with `up -d --no-build --no-recreate` on the VM. One worker stores about 100 readings/s (single thread,
+  two RDS commits per reading), two about 200/s. The run script records the count (`workers: N` in `db_summary.txt`), so tag and folder for the
+  scaling runs carry it: `STAGE=cw2 RUN_NOTE=w2` (tag `cw2m500r<n>`, folder kind `mqtt-100conn-w2`) and `STAGE=cw4 RUN_NOTE=w4`.
+- **Stage C measured set** (MQTT only, 100 connections, 120 s, 3 repeats), with `STAGE_C=1`, the `IOT_*` variables, `DRAIN_MAX_S=1800` and `WORKERS=1`:
+  `measure_run_remote.sh mqtt <rate> <repeat>` for 10, 50, 100 and 500 msg/s; `restart_test_remote.sh <repeat>`; then `WORKERS=2` and `WORKERS=4` with
+  `measure_run_remote.sh mqtt 500 <repeat>` (tags as above). Extra lines in `db_summary.txt`: `workers`, `storing took ... stored per second`, `queue peak`.
+  `python loadtest/result_tables.py stats` also writes `results/queue_stats.csv`, and a `<!-- result_tables: queue stage=C kinds=... -->` block in `docs/RESULTS.md` renders it.
 - **First use:** a 30 s check at 500 msg/s against IoT Core, after the team lead agrees (stage, protocol, rate, duration), then the measured runs.
 - **Generator options** (also usable without the scripts): `--topic-prefix`, `--client-id-prefix`, `--cafile`, `--certfile`, `--keyfile`; or the
   environment variables `TOPIC_PREFIX`, `CLIENT_ID_PREFIX`, `CAFILE`, `CERTFILE`, `KEYFILE` for `run_mqtt.sh`. All are off by default.

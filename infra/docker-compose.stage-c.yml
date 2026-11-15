@@ -43,3 +43,6 @@ services:
   worker:
     <<: *app
     command: ["python", "-m", "app.main", "worker"]
+    deploy:
+      # Number of worker containers; all read the same SQS queue and each message goes to one of them.
+      replicas: ${WORKERS:-1}

@@ -2,8 +2,10 @@
 
     python loadtest/result_tables.py stats [results-dir=results]
         Reads the raw run folders (needs each generator_log.csv) and writes results/run_stats.csv (one line per run)
-        and results/restart_stats.csv (one line per restart-test run). Lines of runs whose folder is not on this
-        machine are kept, so the files can be refreshed after the raw folders have been archived elsewhere.
+        and results/restart_stats.csv (one line per restart-test run). Stage C runs (a queue_depth.csv in the folder)
+        also get a line in results/queue_stats.csv: workers, queue peak, drain time, stored per second.
+        Lines of runs whose folder is not on this machine are kept, so the files can be refreshed after the raw
+        folders have been archived elsewhere.
 
     python loadtest/result_tables.py [results-dir=results] [doc=docs/RESULTS.md]
         Rewrites every block in the doc marked like the one below from those two CSV files (no raw folders needed):
@@ -15,6 +17,8 @@
 
 matrix:  one row per rate and kind; each number is the mean over the repeats, with (lowest-highest) when there are several.
 restart: one row per repeat (longest gap between stored_at values, sent, stored, backlog drain).
+queue:   Stage C only, <!-- result_tables: queue stage=C kinds=mqtt-100conn,mqtt-100conn-w2 -->: one row per kind and rate with the
+         worker count, queue peak, seconds until the queue was empty after sending stopped, and readings stored per second.
 Run folders are named <date>_<Stage>_<kind>_<rate>per-s_run<n> (loadtest/run_name.sh).
 """
 
@@ -42,6 +46,9 @@ RESTART_COLS = [
     "run", "stage", "kind", "rate", "repeat", "gap_s", "gap_from_utc", "gap_to_utc", "stop_requested_utc",
     "stop_returned_utc", "start_requested_utc", "start_returned_utc", "seconds_above_110pct", "peak_stored_per_s",
 ]
+
+
+QUEUE_COLS = ["run", "workers", "queue_peak", "drain_s", "stored_per_s"]
 
 
 def percentile(sorted_values: list[float], p: float) -> float:
@@ -85,6 +92,21 @@ def read_restart(folder: Path, m: re.Match) -> dict:
     }
 
 
+def read_queue(folder: Path) -> dict:
+    """Stage C extras: worker count and stored per second from db_summary.txt, peak from the 5 s queue samples."""
+    db = (folder / "db_summary.txt").read_text()
+    workers = re.search(r"^workers: (\d+)", db, re.MULTILINE)
+    rate = re.search(r"stored per second: ([\d.]+)", db)
+    drained = re.search(r"queue drained after (\d+) s", db)
+    with open(folder / "queue_depth.csv", newline="") as f:
+        peak = max((int(r["visible"]) for r in csv.DictReader(f)), default=0)
+    return {
+        "run": folder.name, "workers": workers.group(1) if workers else "", "queue_peak": peak,
+        "drain_s": drained.group(1) if drained else ("not drained" if "queue did not drain" in db else ""),
+        "stored_per_s": rate.group(1) if rate else "",
+    }
+
+
 def write_merged(path: Path, cols: list[str], rows: list[dict]) -> None:
     """Rows of runs that are not in `rows` are kept, so a refresh never drops archived runs."""
     merged = {}
@@ -99,15 +121,19 @@ def write_merged(path: Path, cols: list[str], rows: list[dict]) -> None:
 
 
 def write_stats(results: Path) -> tuple[int, int]:
-    runs, restarts = [], []
+    runs, restarts, queues = [], [], []
     for folder in sorted(results.iterdir()):
         m = NAME.match(folder.name)
         if m and (folder / "db_summary.txt").exists():
             runs.append(read_run(folder, m))
             if (folder / "restart_summary.txt").exists():
                 restarts.append(read_restart(folder, m))
+            if (folder / "queue_depth.csv").exists():
+                queues.append(read_queue(folder))
     write_merged(results / "run_stats.csv", RUN_COLS, runs)
     write_merged(results / "restart_stats.csv", RESTART_COLS, restarts)
+    if queues or (results / "queue_stats.csv").exists():
+        write_merged(results / "queue_stats.csv", QUEUE_COLS, queues)
     return len(runs), len(restarts)
 
 
@@ -166,7 +192,35 @@ def restart(runs: list[dict], restarts: list[dict], stage: str, kind: str) -> st
     return table(header, rows)
 
 
-def update(doc: Path, runs: list[dict], restarts: list[dict]) -> int:
+def queue(runs: list[dict], queues: list[dict], stage: str, kinds: list[str]) -> str:
+    """Stage C: one row per kind (the worker count is part of the kind) and rate."""
+    by_run = {q["run"]: q for q in queues}
+    rows = []
+    for kind in kinds:
+        for rate in sorted({int(r["rate"]) for r in runs if (r["stage"], r["kind"]) == (stage, kind)}):
+            g = [r for r in runs if (r["stage"], r["kind"], int(r["rate"])) == (stage, kind, rate) and r["run"] in by_run]
+            if not g:
+                continue
+            q = [by_run[r["run"]] for r in g]
+
+            def col(name, digits=0, q=q):
+                values = [float(x[name]) for x in q if x[name] != ""]
+                return spread(values, digits) if values else "n/a"
+
+            drained = [x["drain_s"] for x in q]
+            rows.append([
+                "/".join(sorted({x["workers"] for x in q if x["workers"]})) or "n/a", str(rate), kind, str(len(g)),
+                spread([float(r["server_avg_ms"]) for r in g]), spread([float(r["rtt_median_ms"]) for r in g], 1),
+                spread([float(r["rtt_p95_ms"]) for r in g], 1), col("queue_peak"),
+                "not drained" if "not drained" in drained else (col("drain_s") if all(drained) else "n/a"),
+                col("stored_per_s", 1), str(sum(int(r["missing"]) for r in g)),
+            ])
+    header = ["Workers", "Rate (msg/s)", "Kind", "Runs", "Server time avg (ms)", "Round trip median (ms)", "Round trip p95 (ms)",
+              "Queue peak (messages, 5 s samples)", "Queue empty after sending stopped (s)", "Stored per second", "Missing (sum)"]
+    return table(header, rows)
+
+
+def update(doc: Path, runs: list[dict], restarts: list[dict], queues: list[dict] | None = None) -> int:
     count = 0
 
     def fill(m: re.Match) -> str:
@@ -177,6 +231,8 @@ def update(doc: Path, runs: list[dict], restarts: list[dict]) -> int:
             body = matrix(runs, args["stage"], args["kinds"].split(","))
         elif m["type"] == "restart":
             body = restart(runs, restarts, args["stage"], args["kind"])
+        elif m["type"] == "queue":
+            body = queue(runs, queues or [], args["stage"], args["kinds"].split(","))
         else:
             raise SystemExit(f"unknown block type: {m['type']}")
         return m.group(1) + "\n" + body + "\n" + m.group(5)
@@ -194,5 +250,9 @@ if __name__ == "__main__":
     else:
         results = Path(args[0] if args else "results")
         doc = Path(args[1] if len(args) > 1 else "docs/RESULTS.md")
-        n = update(doc, read_csv(results / "run_stats.csv"), read_csv(results / "restart_stats.csv"))
+        queue_file = results / "queue_stats.csv"
+        n = update(
+            doc, read_csv(results / "run_stats.csv"), read_csv(results / "restart_stats.csv"),
+            read_csv(queue_file) if queue_file.exists() else [],
+        )
         print(f"{n} blocks updated in {doc}")

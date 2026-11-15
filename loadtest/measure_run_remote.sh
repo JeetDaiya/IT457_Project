@@ -95,6 +95,7 @@ if [ -z "${COLLECT_ONLY:-}" ]; then
         if [ -z "$fail" ]; then
             running=$(grep -A1 '^containers running' "$net" | tail -1)
             for svc in api worker; do grep -qw "$svc" <<< "$running" || fail="container $svc is not running on the app host"; done
+            c_workers=$(grep -ow worker <<< "$running" | wc -l)
             for svc in mosquitto postgres; do grep -qw "$svc" <<< "$running" && fail="container $svc is running: that is a Stage B stack, Stage C has no $svc"; done
         fi
         # the queue and the database must be clean before every measured run
@@ -240,5 +241,10 @@ echo "${name%%_*},$csv_stage,$csv_kind,$rate,$repeat,$avg_ms,$p95_ms,$lost,\"ser
 if [ "$c_mode" = 1 ]; then
     echo "rows with stored_at NULL: $((${stored:-0} - ${with_stored:-0}))" >> "$dest/db_summary.txt"
     [ -n "${drain_line:-}" ] && echo "$drain_line" >> "$dest/db_summary.txt"
+    [ -n "${c_workers:-}" ] && echo "workers: $c_workers" >> "$dest/db_summary.txt"
+    span=$(echo "SELECT coalesce(round(extract(epoch FROM max(stored_at) - min(stored_at))::numeric, 1), 0)
+      FROM readings WHERE device_id LIKE '${tag}-%';" | db | tr -d '[:space:]')
+    echo "storing took ${span:-?} s from the first to the last stored_at, stored per second: $(awk -v n="${stored:-0}" -v t="${span:-0}" 'BEGIN { if (t > 0) printf "%.1f", n / t; else print "n/a" }')" >> "$dest/db_summary.txt"
+    [ -f "$dest/queue_depth.csv" ] && echo "queue peak (visible, sampled every 5 s): $(awk -F, 'NR > 1 && $2 + 0 > m { m = $2 + 0 } END { print m + 0 }' "$dest/queue_depth.csv")" >> "$dest/db_summary.txt"
 fi
 cat "$dest/db_summary.txt"

@@ -73,3 +73,55 @@ def test_update_replaces_only_marked_blocks(tmp_path):
     text = doc.read_text()
     assert n == 1 and text.startswith("intro\n") and text.endswith("outro\n") and "OLD" not in text
     assert "| 10 | http | 2 |" in text
+
+
+def make_queue_run(root: Path, name: str, workers: int, drain: str, stored_per_s: str, samples):
+    d = make_run(root, name, [10, 20, 30, 40], server=(4.0, 5.0))
+    with open(d / "db_summary.txt", "a") as f:
+        f.write(f"rows with stored_at NULL: 0\n{drain}\nworkers: {workers}\nstoring took 100.0 s from the first to the last stored_at, stored per second: {stored_per_s}\n")
+    (d / "queue_depth.csv").write_text("time_utc,visible,not_visible\n" + "".join(f"t,{v},10\n" for v in samples))
+    return d
+
+
+def test_queue_stats_and_table(tmp_path):
+    make_queue_run(tmp_path, "2026-01-01_C_mqtt-100conn_500per-s_run1", 1, "queue drained after 580 s", "104.0", [0, 9000, 11500, 0])
+    make_queue_run(tmp_path, "2026-01-01_C_mqtt-100conn_500per-s_run2", 1, "queue drained after 600 s", "100.0", [0, 8000, 0])
+    make_queue_run(tmp_path, "2026-01-01_C_mqtt-100conn-w2_500per-s_run1", 2, "queue drained after 46 s", "207.2", [0, 8195, 0])
+    make_run(tmp_path, "2026-01-01_A_http_10per-s_run1", [10, 20])  # no queue_depth.csv: not a Stage C run
+    assert rt.write_stats(tmp_path) == (4, 0)
+    queues = rt.read_csv(tmp_path / "queue_stats.csv")
+    assert len(queues) == 3
+    first = next(q for q in queues if q["run"].endswith("C_mqtt-100conn_500per-s_run1"))
+    assert (first["workers"], first["queue_peak"], first["drain_s"], first["stored_per_s"]) == ("1", "11500", "580", "104.0")
+    out = rt.queue(rt.read_csv(tmp_path / "run_stats.csv"), queues, "C", ["mqtt-100conn", "mqtt-100conn-w2"])
+    lines = out.splitlines()
+    assert lines[2].startswith("| 1 | 500 | mqtt-100conn | 2 |")
+    assert "| 9750 (8000-11500) | 590 (580-600) | 102.0 (100.0-104.0) | 0 |" in lines[2]
+    assert lines[3].startswith("| 2 | 500 | mqtt-100conn-w2 | 1 |") and "| 8195 | 46 | 207.2 | 0 |" in lines[3]
+    assert len(lines) == 4  # the A run is not in the table
+
+
+def test_queue_run_that_did_not_drain_and_missing_fields(tmp_path):
+    make_queue_run(tmp_path, "2026-01-01_C_mqtt-100conn_500per-s_run1", 1, "queue did not drain within 900 s", "", [5, 50])
+    rt.write_stats(tmp_path)
+    q = rt.read_csv(tmp_path / "queue_stats.csv")[0]
+    assert (q["drain_s"], q["stored_per_s"], q["queue_peak"]) == ("not drained", "", "50")
+    out = rt.queue(rt.read_csv(tmp_path / "run_stats.csv"), [q], "C", ["mqtt-100conn"])
+    assert "| not drained | n/a | 0 |" in out
+
+
+def test_update_fills_a_queue_block_and_old_calls_still_work(tmp_path):
+    make_queue_run(tmp_path, "2026-01-01_C_mqtt-100conn_500per-s_run1", 1, "queue drained after 580 s", "104.0", [0, 9000])
+    rt.write_stats(tmp_path)
+    doc = tmp_path / "doc.md"
+    doc.write_text("<!-- result_tables: queue stage=C kinds=mqtt-100conn -->\nOLD\n<!-- /result_tables -->\n")
+    runs, restarts = rt.read_csv(tmp_path / "run_stats.csv"), rt.read_csv(tmp_path / "restart_stats.csv")
+    assert rt.update(doc, runs, restarts, rt.read_csv(tmp_path / "queue_stats.csv")) == 1
+    assert "| 1 | 500 | mqtt-100conn | 1 |" in doc.read_text() and "OLD" not in doc.read_text()
+    assert rt.update(doc, runs, restarts) == 1  # the three-argument form still works; the table is just empty
+    assert "| 1 | 500 |" not in doc.read_text()
+
+
+def test_no_queue_file_is_written_for_stage_a_and_b_only(tmp_path):
+    build(tmp_path)
+    assert not (tmp_path / "queue_stats.csv").exists()
