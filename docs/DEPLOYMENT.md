@@ -11,6 +11,7 @@ Stage C services, all in Mumbai and created 2026-11-13/14 (details under Stage C
 - Oracle ARM instance in Mumbai: aarch64, 2 cores, ~12 GB RAM, Ubuntu 24.04, Docker installed. It is shared with other projects (`~/app`, `~/pr-review-agent`); do not touch those.
 - Ours lives in `~/it457-loadgen/` (`loadtest/`, `results/`, `calibration/`) plus the Docker image `it457-loadgen`. Nothing is installed on the host and no system setting was changed. Build and run steps are in `loadtest/README.md`.
 - The IP address and SSH key are not kept in the repo; use `<oracle-ip>` in docs and scripts.
+- **Stage C certificates (2026-11-14):** `~/iot-certs/` on the Oracle box (mode 700) holds the IoT device certificate `device.crt`, its private key `device.key` (mode 600) and `AmazonRootCA1.pem`. Only the Oracle box has them besides the creator's local copy; the generator container mounts the folder read-only (`IOT_CERT_DIR`, see `loadtest/README.md`). Delete the folder when Stage C measurements are finished.
 - **Currently running on Oracle:** one container, `it457-tailscale` (the Tailscale link to the Stage A laptop, below); no load is running. Not an AWS cost.
 - **Calibration (2026-11-10, generator alone against the 0.22 s stubs, 2 min):** HTTP and MQTT (1 connection) both reached 500 msg/s (`meets_rate_rule` true, 60,000 of 60,000 acknowledged, p99 schedule lag about 1 ms for HTTP and 0.2 ms for MQTT). Raw output is in `~/it457-loadgen/calibration/` on the box, not in `results/`.
 

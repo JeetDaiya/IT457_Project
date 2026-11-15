@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Restart test when the stack runs on a remote VM (Stage B): one MQTT run with the worker stopped for a while in the middle.
 # restart_test.sh is the Stage A version (it needs the stack on the machine you start it on). Folder name ..._B_mqtt-<N>conn-restart_...,
-# database tag stage label "brestart".
+# database tag stage label "brestart". With STAGE_C=1 (plus the IOT_* variables, see measure_run_remote.sh): Stage C, folder name
+# ..._C_..., stage label "crestart"; IoT Core and SQS keep the readings while the worker is down, so none should be missing.
 #   ORACLE=ubuntu@<oracle-ip> ORACLE_KEY=<key> APP=ubuntu@<ec2-ip> APP_KEY=<key> \
 #     ./loadtest/restart_test_remote.sh <repeat> [rate=100] [stop_after_s=40] [down_s=20]
 # Runs loadtest/measure_run_remote.sh for the measured run. Meanwhile this script waits for the first readings to be stored,
@@ -19,15 +20,21 @@ fi
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 . "$root/loadtest/run_name.sh"
-export STAGE=brestart STAGE_NAME=B RUN_NOTE=restart CONNECTIONS=${CONNECTIONS:-100}
-tag="brestartm${rate}r${repeat}"
+if [ "${STAGE_C:-}" = 1 ]; then stage=crestart stage_name=C compose_file=infra/docker-compose.stage-c.yml
+else stage=brestart stage_name=B compose_file=infra/docker-compose.yml; fi
+export STAGE=$stage STAGE_NAME=$stage_name RUN_NOTE=restart CONNECTIONS=${CONNECTIONS:-100}
+tag="${stage}m${rate}r${repeat}"
 local_root=${LOCAL_ROOT:-$root/results}
 app_dir=${APP_DIR:-IT457_Project}
 ssh_opts="-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=3"
-compose="cd $app_dir && sudo docker compose --env-file .env -f infra/docker-compose.yml"
+compose="cd $app_dir && sudo docker compose --env-file .env -f $compose_file"
 app_ssh() { ssh -n -i "$APP_KEY" $ssh_opts "$APP" "$@"; }
 # SQL goes in on stdin: echo "SELECT 1;" | db
-db() { ssh -i "$APP_KEY" $ssh_opts "$APP" "$compose exec -T postgres sh -c 'psql -U \$POSTGRES_USER -d \$POSTGRES_DB -At -F ,'"; }
+if [ "${STAGE_C:-}" = 1 ]; then   # RDS is private: psql runs in a throwaway container on the app host
+    db() { ssh -i "$APP_KEY" $ssh_opts "$APP" "cd $app_dir && set -a && . ./.env && set +a && sudo docker run --rm -i -e PGPASSWORD=\"\$RDS_PASSWORD\" -v \"\$RDS_CA_BUNDLE:/ca.pem:ro\" postgres:16 psql \"host=\$RDS_HOST user=\$RDS_USER dbname=\$RDS_DB sslmode=verify-full sslrootcert=/ca.pem\" -At -F ,"; }
+else
+    db() { ssh -i "$APP_KEY" $ssh_opts "$APP" "$compose exec -T postgres sh -c 'psql -U \$POSTGRES_USER -d \$POSTGRES_DB -At -F ,'"; }
+fi
 vm_now() { app_ssh "date -u +%FT%T.%3NZ"; }
 worker_step() {  # <stop|start>: both timestamps come from the VM, so they can be compared with stored_at
     app_ssh "echo ${1}_requested=\$(date -u +%FT%T.%3NZ); $compose $1 worker >/dev/null 2>&1; echo ${1}_returned=\$(date -u +%FT%T.%3NZ)"

@@ -8,6 +8,7 @@ Stdlib only, so it also runs on a bare machine: python loadtest/stub_mqtt_broker
 
 import argparse
 import asyncio
+import ssl
 import threading
 from typing import Self
 
@@ -33,11 +34,20 @@ async def _read_packet(reader: asyncio.StreamReader) -> tuple[int, int, bytes]:
 class StubBroker:
     """The stub, run in a background thread (used by main() and by the tests)."""
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 0, delay: float = 0.22):
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 0,
+        delay: float = 0.22,
+        tls: ssl.SSLContext | None = None,
+    ):
         self.host = host
         self.port = port
         self.delay = delay
+        self.tls = tls  # a server context turns on TLS (tests of the TLS generator)
         self.publish_count = 0
+        self.client_ids: list[str] = []
+        self.topics: set[str] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._ready = threading.Event()
@@ -66,7 +76,7 @@ class StubBroker:
         self._loop = loop
         asyncio.set_event_loop(loop)
         server = loop.run_until_complete(
-            asyncio.start_server(self._handle, self.host, self.port)
+            asyncio.start_server(self._handle, self.host, self.port, ssl=self.tls)
         )
         self.port = server.sockets[0].getsockname()[1]
         self._ready.set()
@@ -89,11 +99,15 @@ class StubBroker:
             while True:
                 kind, flags, body = await _read_packet(reader)
                 if kind == CONNECT:
+                    # client ID follows "MQTT", level, flags and keepalive (10 bytes)
+                    id_len = int.from_bytes(body[10:12], "big")
+                    self.client_ids.append(body[12 : 12 + id_len].decode())
                     writer.write(CONNACK)
                 elif kind == PUBLISH:
                     self.publish_count += 1
+                    topic_len = int.from_bytes(body[:2], "big")
+                    self.topics.add(body[2 : 2 + topic_len].decode())
                     if (flags >> 1) & 3 == 1:  # QoS 1: packet id follows the topic
-                        topic_len = int.from_bytes(body[:2], "big")
                         packet_id = body[2 + topic_len : 4 + topic_len]
                         loop.call_later(self.delay, self._puback, writer, packet_id)
                 elif kind == PINGREQ:
