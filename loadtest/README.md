@@ -256,3 +256,12 @@ FROM readings WHERE device_id LIKE 'am10r1-%' GROUP BY device_id ORDER BY device
 
 `lost` is the per-device gap formula; also check that the total of `stored` equals the
 generator's `ok` count, because a lost final message leaves no gap.
+
+# B to C migration test (`migration_run_remote.sh`)
+
+Database only, cold cutover, on the Stage B stack: `ORACLE=... ORACLE_KEY=... APP=... APP_KEY=... ROWS=10000 DURATION=600 ./loadtest/migration_run_remote.sh <http|mqtt> <repeat> 100 60`.
+It resets and seeds the databases on the VM (`migration_prepare.sh`), starts the load through `measure_run_remote.sh` (`MIGRATION=1`, run tag `mig<h|m>100r<n>`),
+runs `migration_cutover.sh` on the VM 60 s after the first load rows, then `migration_checks.sh` after the load, and writes `migration_summary.txt` (where the time went,
+the longest `stored_at` gap as the downtime, sent against stored, seq gaps, server time before and after, MQTT catch-up). `migration_summary.py` computes the step times and the
+catch-up (stdlib only). Needs the migration scripts and `infra/docker-compose.migration.yml` on the VM and `RDS_*` in its `.env`. Reset and drops are limited to
+`minihs_src` and `minihs_migrated`. Use run numbers that have not been used on the Oracle box (a folder name is never reused). Details: `docs/DEPLOYMENT.md`, results: `docs/RESULTS.md`.

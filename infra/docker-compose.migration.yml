@@ -1,0 +1,18 @@
+# B -> C migration test: the Stage B stack (infra/docker-compose.yml) with the app's database chosen when it is started.
+# Used only as a second -f file, with MIG_DATABASE_URL in the environment (loadtest/migration_lib.sh does this):
+#   sudo env MIG_DATABASE_URL=<url> docker compose --env-file .env \
+#     -f infra/docker-compose.yml -f infra/docker-compose.migration.yml up -d api worker
+# Before the cutover the URL points at the VM's Postgres (database minihs_src), after it at RDS (database minihs_migrated,
+# sslmode=verify-full with the CA bundle mounted below). Needs RDS_CA_BUNDLE in .env, as Stage C does. Postgres and
+# Mosquitto are not touched: Mosquitto keeps holding MQTT readings while api and worker are stopped.
+services:
+  api:
+    environment:
+      DATABASE_URL: ${MIG_DATABASE_URL:?set MIG_DATABASE_URL (loadtest/migration_lib.sh does)}
+    volumes:
+      - ${RDS_CA_BUNDLE:?set RDS_CA_BUNDLE in .env to the full path of the CA bundle}:/certs/global-bundle.pem:ro
+  worker:
+    environment:
+      DATABASE_URL: ${MIG_DATABASE_URL:?set MIG_DATABASE_URL (loadtest/migration_lib.sh does)}
+    volumes:
+      - ${RDS_CA_BUNDLE:?set RDS_CA_BUNDLE in .env to the full path of the CA bundle}:/certs/global-bundle.pem:ro

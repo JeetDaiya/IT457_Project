@@ -74,6 +74,8 @@ Settings-only; no forked code. See `CLAUDE.md` §Project context for the A / B /
 
 `infra/docker-compose.yml` is the same file on the laptop and on the EC2 VM. Four services: `postgres` (healthcheck, named volume), `mosquitto` (`infra/mosquitto/mosquitto.conf`: anonymous listener on 1883, persistence, queue limit raised), `api` and `worker` (one image from `infra/Dockerfile`, Python 3.12; commands `python -m app.main api` / `worker`). `api` and `worker` wait for Postgres to be healthy and get `DATABASE_URL` and `MQTT_HOST` from Compose, everything else from `.env`. Published on the host: 8000 (API), 1883 (MQTT), 5432 or `POSTGRES_HOST_PORT` (Postgres). Anonymous MQTT is for local and firewalled testing only.
 
+`infra/docker-compose.migration.yml` (B to C migration test only) is a second `-f` file on top of `docker-compose.yml`: it takes the api and worker `DATABASE_URL` from `MIG_DATABASE_URL` and mounts the RDS CA bundle, so the same containers can run on the VM's Postgres and then on RDS. See `docs/DEPLOYMENT.md` and `docs/RESULTS.md`.
+
 ## Tests
 
 - **Unit/API** (`tests/unit`, `tests/api`): mocked, no services needed. Plain `pytest`.

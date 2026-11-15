@@ -6,6 +6,8 @@ One team-owned EC2 instance in **Mumbai (`ap-south-1`)** with the Stage B Compos
 
 Stage C services, all in Mumbai and created 2026-11-13/14 (details under Stage C below): RDS `mini-hs-db` (PostgreSQL 16.11, `db.t4g.micro`, 20 GiB gp3; **bills about $0.025/hour while running, stop it when idle; AWS restarts a stopped instance after 7 days**), SQS queue `mini-hs-readings`, IAM roles `mini-hs-iot-to-sqs-role` and `mini-hs-ec2-worker-role`, IoT Core policy, certificate and rule, security group `mini-hs-rds-sg`. Only RDS (and the EC2) bill by the hour; the rest cost nothing until messages flow. **RDS was stopped on 2026-11-15 (reported by the user, not checked from here); AWS will start it again by itself after 7 days (about 2026-11-22), so stop it again or delete it when the Stage C work is finished.** Stop or delete them after the measurements.
 
+**Migration test, 2026-11-15:** the EC2 (started about 11:00 UTC) and RDS `mini-hs-db` were still running when the last run finished at 12:47 UTC; the user stops both (no AWS CLI access from the session), so check the console. The VM runs api and worker on RDS database `minihs_migrated` (see "B → C migration test" below), plus the Stage B Postgres and Mosquitto containers. RDS now also holds the database `minihs_migrated` (about 190 MB); the VM Postgres holds `minihs_src`. Both are test data and can be dropped.
+
 ## Load generator (Oracle Cloud Always Free, outside AWS)
 
 - Oracle ARM instance in Mumbai: aarch64, 2 cores, ~12 GB RAM, Ubuntu 24.04, Docker installed. It is shared with other projects (`~/app`, `~/pr-review-agent`); do not touch those.
@@ -61,3 +63,14 @@ The app (`api` and `worker`) stays on the Mumbai EC2; the database is RDS and th
   The first run failed in the two SQS tests (see `GOTCHAS.md`: a frozen worker); they passed after `docker restart infra-worker-1`. The connection-timeout fix in `app/db.py` was not yet deployed on the VM for that run.
 - **Gotchas found on the VM:** under `sudo`, `${HOME}` is `/root`, so a default of `~/global-bundle.pem` makes Docker mount an empty directory and the app fails with "could not read root certificate file ... no certificate or crl found" (hence no default for `RDS_CA_BUNDLE`); the Stage B containers (`infra-postgres-1`, `infra-mosquitto-1`) stay as orphans of the shared project name `infra`: leave them, and stop Stage C before starting Stage B again.
 - **Open:** DLQ yes or no; pool sizes against `max_connections` 79; Stage C hours and cost to be recorded when the runs finish (so far: on 2026-11-14 the EC2 and RDS each ran about 30 minutes, 11:54 to 12:38 IST session, for the first start of the Stage C stack).
+
+
+## B → C migration test (database only, cold cutover)
+
+Scripts in `loadtest/` (details and results in `docs/RESULTS.md`); the VM-side ones run from `~/IT457_Project` and use `.env` (`POSTGRES_*`, `RDS_*`, `RDS_CA_BUNDLE`):
+- `infra/docker-compose.migration.yml`: second `-f` file on top of `infra/docker-compose.yml`; sets the api and worker `DATABASE_URL` from `MIG_DATABASE_URL` and mounts the RDS CA bundle. `loadtest/migration_lib.sh` builds the two URLs and the helpers.
+- `loadtest/migration_prepare.sh [rows_per_device=10000]`: drops and recreates `minihs_src` (VM Postgres) and drops `minihs_migrated` (RDS), starts api and worker on `minihs_src`, seeds 100 devices x rows. These two names are the only databases it may drop; `minihs` on RDS and the Stage B database are never touched.
+- `loadtest/migration_cutover.sh`: creates `minihs_migrated`, stops api and worker, `pg_dump -Fc`, `pg_restore` (one job), starts api and worker on RDS; times in `/tmp/migration/cutover_steps.txt`. `loadtest/migration_checks.sh`: counts, MD5 and 1,000 sampled rows, source against RDS, run after the load.
+- `loadtest/migration_run_remote.sh <http|mqtt> <repeat> [rate] [before_s]` (from the laptop, same `ORACLE`/`APP` variables as `measure_run_remote.sh`; `ROWS`, `DURATION`, `SKIP_PREPARE`): prepare, load, cutover, checks, `migration_summary.txt` in the run folder (`results/<date>_BtoC_<kind>_100per-s_run<n>`).
+- After a migration run the VM's api and worker are the Stage B images on RDS database `minihs_migrated` (no restart policy), not the Stage C stack: to go back, run the Stage C command from the Stage C section.
+- Run on 2026-11-15 (MQTT and HTTP, repeats 2 to 4, plus a pilot run 1 and a dry run). While the migration scripts are only on a feature branch, rsync them to the VM; delete those untracked files before the first `git pull` after the merge.

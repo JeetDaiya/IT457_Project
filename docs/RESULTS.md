@@ -356,3 +356,50 @@ bill are month totals and cannot be matched to the window: EC2 compute $0.40, EC
 messages flow, so each idle hour is about as much as the whole IoT cost of 40,000 messages. The cost per million above assumes the machines
 are on only for the runs. At a steady 100 msg/s (360,000 messages an hour) the always-on stack is about $0.16 per million messages, and IoT Core about $1.37
 per million, so about $1.53 per million in all, nearly the same as the $1.55 of the measured window.
+
+
+## B → C migration test (database only, cold cutover)
+
+Setup: the Stage B stack on the Mumbai VM (api, worker, Mosquitto, Postgres container) with a steady 100 msg/s load from the Oracle box
+(HTTP or MQTT, 100 connections, 600 s, 60,000 messages). The database `minihs_src` on the VM's Postgres holds 1,000,000 seeded readings
+(100 devices x 10,000, 190 MB). 60 s after the first load rows, `loadtest/migration_cutover.sh` (on the VM) stops api and worker, runs
+`pg_dump -Fc`, restores with one `pg_restore` job into a new empty database `minihs_migrated` on RDS (`db.t4g.micro`, same region, TLS
+`verify-full`), and starts api and worker on it. Only `DATABASE_URL` changes; the generator keeps sending to the VM, so the path (HTTP to the api,
+MQTT to Mosquitto) is the Stage B path. Three repeats per protocol (runs 2 to 4; run 1 was a pilot, see below). Raw folders:
+`results/2026-11-15_BtoC_*`.
+
+| Protocol | Run | Downtime (longest `stored_at` gap, s) | Stopped time (stop to `/health` ok, s) | pg_dump (s) | pg_restore (s) | Sent | Stored | Missing | Server time before / after (ms, avg) |
+|---|---|---|---|---|---|---|---|---|---|
+| MQTT | 2 | 16.93 | 27.3 | 3.9 | 10.1 | 60,000 | 60,000 | 0 | 2.04 / 4.49 |
+| MQTT | 3 | 15.20 | 25.8 | 3.9 | 8.4 | 60,000 | 60,000 | 0 | 2.12 / 4.46 |
+| MQTT | 4 | 15.19 | 25.8 | 4.0 | 8.3 | 60,000 | 60,000 | 0 | 2.33 / 4.50 |
+| HTTP | 2 | 25.20 | 25.6 | 3.9 | 8.3 | 60,000 | 57,483 | 2,517 | 2.08 / 5.15 |
+| HTTP | 3 | 25.03 | 25.5 | 3.9 | 8.2 | 60,000 | 57,501 | 2,499 | 2.25 / 5.30 |
+| HTTP | 4 | 25.35 | 25.7 | 3.9 | 8.4 | 60,000 | 57,468 | 2,532 | 2.13 / 5.86 |
+
+Every run passed all data checks (`loadtest/migration_checks.sh`, rows with `id` up to the highest id at the stop): row and device counts, per-device
+counts, one MD5 over all rows, patients, and 1,000 sampled rows identical field by field; the 100 seed devices have no `seq` gap. The dump file is
+about 19.7 MB.
+
+### Findings (migration)
+
+- **Downtime is about 15 s for MQTT and about 25 s for HTTP, and the dump and restore are not the main part.** Dump takes about 4 s and restore 8 to 10 s for
+  1,000,000 rows; stopping api and worker takes 10.3 s and starting on RDS 2.2 to 2.9 s. The stopped time is about 26 s in every run.
+- **MQTT shows less downtime than the stopped time because the worker keeps storing for about 10 s after the stop is requested** (it ignores the stop signal and is
+  killed after Docker's 10 s timeout, see GOTCHAS), so the `stored_at` gap is the stopped time minus about 10 s. HTTP has no such delay: the api stops at once, so the gap
+  equals the stopped time.
+- **Lost readings: MQTT 0, HTTP about 2,500 per run (about 25 s x 100/s).** Mosquitto keeps the MQTT readings (persistent session) and the worker stores them after the
+  restart; refused HTTP requests are gone. After the restart the MQTT worker had caught up after 6 to 7 s (read from `stored_per_second.csv`: the first second from which ten seconds in a row average the load rate; the number is in each run's `migration_summary.txt`).
+- **Server time doubles on RDS** (about 2.1 ms on the VM's own Postgres, about 4.5 ms on RDS for MQTT, 5.2 to 5.9 ms for HTTP), which is the cost of the network round
+  trip to the database; the HTTP figure after the restart rose from 5.15 to 5.86 ms over the three runs (not investigated).
+- **One MQTT reading kept `stored_at` NULL** (run 4, and one in the dry run): the worker was killed between the insert and the second statement, the broker redelivered the
+  message, and the duplicate is not repaired (the edge case in GOTCHAS). The other runs had none.
+
+### What these numbers cannot say (migration)
+
+- Cold cutover only; an online variant (dump while running, copy the rest) would cut the downtime to seconds and was not measured.
+- Database only: the readings path was not changed, so IoT Core and SQS (which would hold readings during an outage) are not part of this test.
+- One data size (1,000,000 rows, 190 MB) and one rate (100 msg/s); dump and restore times grow with size. RDS was single-AZ, `db.t4g.micro`, in the same region as the VM.
+- **Run 1 (MQTT, 2026-11-15) is a pilot:** the data checks ran while the load was still running, and the worker's storing rate dropped to a few readings per second for about 10 s right after
+  the restart (probably the MD5 over 1,000,000 rows competing with it on the `db.t4g.micro`; the cause was not isolated), which distorts its catch-up and server time. It is kept in `results/` (and `summary.csv`) but not in the table. The checks now run after the load has finished.
+- A 4-minute dry run with 10,000 seed rows (and no row in `results/`) was used to test the scripts.
