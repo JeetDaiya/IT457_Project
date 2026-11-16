@@ -35,22 +35,17 @@ The load generator runs on an Oracle Cloud Always Free instance in Mumbai, outsi
 | **B** | One AWS EC2 VM in Mumbai, same Compose file | Lift-and-shift: same files, new place. Shows what a small VM can and cannot carry. |
 | **C** | EC2 plus Amazon RDS, AWS IoT Core and SQS | Refactor: the database and broker become managed services, readings reach the workers through a queue. |
 
-<details>
-<summary>Stage diagrams</summary>
-
-**Stage A**
+### Stage A
 
 ![Stage A](docs/diagrams/stage-a.png)
 
-**Stage B**
+### Stage B
 
 ![Stage B](docs/diagrams/stage-b.png)
 
-**Stage C**
+### Stage C
 
 ![Stage C](docs/diagrams/stage-c.png)
-
-</details>
 
 ## Main results
 
