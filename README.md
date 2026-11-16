@@ -85,6 +85,7 @@ This is a short summary. The detailed per-task log with times and problems is in
 | **Migration B to C** | Migration scripts, runs and results | | |
 | **Dashboard** | | Results dashboard at `/dashboard/` | |
 | **Docs and results** | Results tooling and `docs/RESULTS.md`, architecture doc | Stage B findings | Stage C findings and cost |
+| **Week 4 report** | | LaTeX report of the measured results (results, plan versus what we did, problems, cost), charts and tables generated from `results/` | |
 
 **Report.** Roles as agreed in the Week 2 report (Table XXI). Jeet leads the build and the cost model, and checks that each section matches what was built.
 
