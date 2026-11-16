@@ -103,14 +103,47 @@ The reports are in [`docs/reports`](docs/reports): Week 1 (case summary), Week 2
 
 ## Run it
 
-Stage A, on any machine with Docker:
+Replace `<key>`, `<ec2-ip>` and `<oracle-ip>` with your own values. They are not kept in the repo.
+
+**Application** (Stage A on any machine with Docker, or Stage B on the VM):
 
 ```bash
 cp .env.example .env
-docker compose --env-file .env -f infra/docker-compose.yml up --build
+docker compose --env-file .env -f infra/docker-compose.yml up --build -d
+curl localhost:8000/health        # {"status":"ok"}
+docker compose --env-file .env -f infra/docker-compose.yml down   # stop
 ```
 
-The API is on port 8000 (`/` form, `/readings/latest`, `/stats`, `/health`, `/dashboard/`) and MQTT on 1883. Stage B uses the same file on the VM; Stage C uses `infra/docker-compose.stage-c.yml`. Steps for B and C, including the AWS setup, are in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Load-test usage is in [`loadtest/README.md`](loadtest/README.md).
+The API is on port 8000 (`/` form, `/readings/latest`, `/stats`, `/health`, `/dashboard/`) and MQTT on 1883. Stage C uses `infra/docker-compose.stage-c.yml` with the RDS and SQS values in `.env`. Setup for B and C is in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
+**SSH:**
+
+```bash
+ssh -i <key> ubuntu@<ec2-ip>      # EC2 VM (Stages B and C)
+ssh -i <key> ubuntu@<oracle-ip>   # Oracle load-generator box
+```
+
+**Load generator.** On the Oracle box, build once, then run by hand:
+
+```bash
+cd ~/it457-loadgen
+docker build -f loadtest/Dockerfile -t it457-loadgen .
+RUN="docker run --rm --network host --user $(id -u):$(id -g) \
+  -v $PWD/loadtest:/work/loadtest:ro -v $PWD/results:/work/results \
+  -v $PWD/calibration:/work/calibration it457-loadgen"
+
+$RUN ./loadtest/run_http.sh <stage> <rate> <repeat> http://<app-host>:8000
+$RUN ./loadtest/run_mqtt.sh <stage> <rate> <repeat> <broker-host>
+```
+
+Or run a full measured run from your laptop. It drives both machines over SSH and collects the results:
+
+```bash
+ORACLE=ubuntu@<oracle-ip> ORACLE_KEY=<key> APP=ubuntu@<ec2-ip> APP_KEY=<key> \
+  ./loadtest/measure_run_remote.sh <http|mqtt> <rate> <repeat>
+```
+
+For Stage C (MQTT only), add `STAGE_C=1 IOT_ENDPOINT=<iot-endpoint> IOT_CERT_DIR=/home/ubuntu/iot-certs IOT_CA=AmazonRootCA1.pem IOT_CERT=device.crt IOT_KEY=device.key` in front. Rates used are 10, 50, 100 and 500 messages/s. More options are in [`loadtest/README.md`](loadtest/README.md). Stop the EC2 VM and RDS after every session, because they cost money while running.
 
 ## Repository layout
 
