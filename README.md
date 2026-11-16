@@ -156,6 +156,7 @@ For Stage C (MQTT only), add `STAGE_C=1 IOT_ENDPOINT=<iot-endpoint> IOT_CERT_DIR
 | Document | What it covers |
 |---|---|
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Layers, interfaces, database schema |
+| [`docs/API.md`](docs/API.md) | HTTP endpoints, MQTT input, reading format and limits |
 | [`docs/RESULTS.md`](docs/RESULTS.md) | Measured results and findings per stage |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | What runs where, setup steps, environment variables |
 | [`docs/GOTCHAS.md`](docs/GOTCHAS.md) | Problems we hit and how to avoid them |
